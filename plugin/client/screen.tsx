@@ -89,7 +89,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             <Text style={{ color: theme.colors.foreground, fontSize: layout.compact ? 20 : 24, fontWeight: "700" }}>Kubernetes Sandbox</Text>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Run a workspace's agents, terminals and commands in a Kubernetes pod.</Text>
           </View>
-          <ExternalLink href="https://github.com/lerenn/paseo-kubernetes-sandbox/blob/main/docs/setup.md">Setup guide</ExternalLink>
+          <ExternalLink href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md">Setup guide</ExternalLink>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
           {TABS.map((t) => {

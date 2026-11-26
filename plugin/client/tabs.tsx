@@ -13,7 +13,7 @@ export type PodRows = z.output<typeof podsList.output>["pods"];
 export type WorkspaceRows = z.output<typeof workspacesList.output>["workspaces"];
 export type TabId = "overview" | "cluster" | "workspaces" | "pods" | "settings";
 
-const DOCS = "https://github.com/lerenn/paseo-kubernetes-sandbox/blob/main/docs/setup.md";
+const DOCS = "https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md";
 const checkTone = (s: string): Tone => (s === "ok" ? "success" : s === "warn" ? "warning" : "muted");
 const MODE_LABEL: Record<Mode, string> = { shared: "Shared worktree", clone: "Pod-local clone" };
 const mono = { fontFamily: "monospace" } as const;
@@ -145,7 +145,7 @@ export function ClusterTab(p: Common & { draft: Configuration; patch<K extends k
         <View style={{ padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface0 }}>
           <Text selectable style={{ ...text, ...mono }}>
             kubectl apply -n {draft.namespace} -f config/plugin-rbac.yaml{"\n"}
-            kubectl create rolebinding paseo-kubernetes-sandbox -n {draft.namespace} --role=paseo-kubernetes-sandbox --user=YOU
+            kubectl create rolebinding paseo-kubernetes-sandboxes -n {draft.namespace} --role=paseo-kubernetes-sandboxes --user=YOU
           </Text>
         </View>
         <ExternalLink href={DOCS}>Full setup guide</ExternalLink>

@@ -2,12 +2,12 @@
 # Apply it in the sandbox namespace, for example:
 #   kubectl create namespace paseo-sandbox
 #   kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
-#   kubectl create rolebinding paseo-kubernetes-sandbox -n paseo-sandbox \
-#     --role=paseo-kubernetes-sandbox --user=<your-user>
+#   kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandbox \
+#     --role=paseo-kubernetes-sandboxes --user=<your-user>
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: paseo-kubernetes-sandbox
+  name: paseo-kubernetes-sandboxes
   namespace: paseo-sandbox
 rules:
   - apiGroups: ['']
@@ -20,7 +20,7 @@ rules:
     resources: [pods/log]
     verbs: [get]
   # Cluster tab checks the shared worktree claim; clone mode with a per-sandbox volume creates and
-  # deletes its own claims (labelled managed-by=paseo-kubernetes-sandbox).
+  # deletes its own claims (labelled managed-by=paseo-kubernetes-sandboxes).
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
     verbs: [get, list, create, delete]
