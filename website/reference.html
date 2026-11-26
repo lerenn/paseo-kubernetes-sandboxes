@@ -10,20 +10,38 @@
 <a class="skip" href="#content">Skip to content</a>
 <header class="site"><div class="inner"><a class="brand" href="index.html"><img src="assets/favicon.png" width="28" height="28" alt="">Kubernetes Sandbox</a>
 <nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html" aria-current="page">Reference</a><a href="how-it-works.html">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a></nav></div></header>
+<div class="doc">
+<aside class="sidebar"><details class="toc-mobile" open><summary>On this page</summary><nav aria-label="On this page">
+<a href="#settings">Settings</a>
+<a href="#sidecars">Sidecars</a>
+<a href="#hooks">Hooks</a>
+<a href="#pod">Pod</a>
+<a href="#launcher">Launcher</a>
+<a href="#cluster-rights">Cluster admin tasks: cluster rights (optional)</a>
+<a href="#rbac">RBAC</a>
+</nav></details></aside>
 <main id="content">
 <h1>Reference</h1>
-<h2>Settings</h2><ul><li><strong>Image</strong>: needs a shell and your tools. Required.</li><li><strong>CPU / memory</strong>: requests and limits of the main container.</li><li><strong>Worktree volume</strong>: claim, mount path (same path in the pod), optional sub path. Required.</li><li><strong>Idle timeout</strong>: minutes before an idle pod is deleted; 0 disables it.</li><li><strong>Environment Secret</strong>: optional Secret exposed as environment variables.</li><li><strong>Sidecars</strong>: named extra containers (image, command, env, resources, readiness probe, state volume, optional privileged flag), enabled by default or per workspace. Docker is a documented example, not a preset.</li><li><strong>Pod overrides</strong>: runtimeClassName, tolerations, nodeSelector, priorityClassName, imagePullSecrets.</li><li><strong>Context, namespace</strong>: where pods are created.</li></ul>
-<h2>Sidecars</h2><p>See <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#sidecars">Sidecars</a> in the setup guide: fields, a docker example, requirements, and what is not tested. A privileged sidecar is weaker isolation.</p>
-<h2>Hooks</h2><ul><li><code>agent.open.before</code>, <code>terminal.create.before</code>, <code>command.run.before</code>: return <code>wrap</code> for opted-in workspaces.</li><li><code>workspace.archive.after</code>: deletes the workspace's pod.</li></ul>
-<h2>Pod</h2><p>Named <code>sbx-&lt;hash of workspace id&gt;</code>, labelled <code>app.kubernetes.io/managed-by=paseo-sandboxes</code>, with a shared process namespace and no service account token. The main container idles; work arrives through <code>kubectl exec</code>.</p>
-<h2>Launcher</h2><pre><code>kube-exec.sh --namespace NS --pod POD [--context C] [--container main]
+<h2 id="settings">Settings</h2><ul><li><strong>Image</strong>: needs a shell and your tools. Required.</li><li><strong>CPU / memory</strong>: requests and limits of the main container.</li><li><strong>Worktree volume</strong>: claim, mount path (same path in the pod), optional sub path. Required.</li><li><strong>Idle timeout</strong>: minutes before an idle pod is deleted; 0 disables it.</li><li><strong>Environment Secret</strong>: optional Secret exposed as environment variables.</li><li><strong>Sidecars</strong>: named extra containers (image, command, env, resources, readiness probe, state volume, optional privileged flag), enabled by default or per workspace. Docker is a documented example, not a preset.</li><li><strong>Pod overrides</strong>: runtimeClassName, tolerations, nodeSelector, priorityClassName, imagePullSecrets.</li><li><strong>Context, namespace</strong>: where pods are created.</li></ul>
+<h2 id="sidecars">Sidecars</h2><p>See <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#sidecars">Sidecars</a> in the setup guide: fields, a docker example, requirements, and what is not tested. A privileged sidecar is weaker isolation.</p>
+<h2 id="hooks">Hooks</h2><ul><li><code>agent.open.before</code>, <code>terminal.create.before</code>, <code>command.run.before</code>: return <code>wrap</code> for opted-in workspaces.</li><li><code>workspace.archive.after</code>: deletes the workspace's pod.</li></ul>
+<h2 id="pod">Pod</h2><p>Named <code>sbx-&lt;hash of workspace id&gt;</code>, labelled <code>app.kubernetes.io/managed-by=paseo-sandboxes</code>, with a shared process namespace and no service account token. The main container idles; work arrives through <code>kubectl exec</code>.</p>
+<h2 id="launcher">Launcher</h2><pre><code>kube-exec.sh --namespace NS --pod POD [--context C] [--container main]
   [--cwd DIR] [--env NAME]... [--state-dir /tmp/sbx] -- command [args...]</code></pre>
 <p>Forwarded variable values travel as <code>kubectl exec</code> arguments. Use the environment Secret for credentials.</p>
 <h2 id="cluster-rights">Cluster admin tasks: cluster rights (optional)</h2><p>Needed only when the identity <code>kubectl</code> uses lacks pods, pods/exec, pods/log and persistent volume claim rights in the namespace. They are not needed with cluster-admin, or when a GitOps repository already applies the Role. The plugin cannot grant itself rights; <strong>Check cluster</strong> only verifies them, read-only (<code>kubectl auth can-i</code>). A cluster admin runs:</p><pre><code>kubectl create namespace paseo-sandboxes
 kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
 kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
   --role=paseo-sandboxes --user=&lt;identity&gt;</code></pre>
-<h2>RBAC</h2><p>pods: get, list, watch, create, delete; pods/exec: create; pods/log: get; persistentvolumeclaims: get.</p>
+<h2 id="rbac">RBAC</h2><p>pods: get, list, watch, create, delete; pods/exec: create; pods/log: get; persistentvolumeclaims: get.</p>
 </main>
+</div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>
+<script>
+(function(){var d=document.querySelector('.toc-mobile'),q=matchMedia('(max-width: 52rem)');function f(){d.open=!q.matches}f();q.addEventListener('change',f);
+var l=[].slice.call(document.querySelectorAll('.sidebar nav a')),m={};l.forEach(function(a){m[a.hash.slice(1)]=a});
+if(!('IntersectionObserver' in window))return;
+var o=new IntersectionObserver(function(e){e.forEach(function(x){if(x.isIntersecting){l.forEach(function(a){a.classList.remove('active');a.removeAttribute('aria-current')});var a=m[x.target.id];a.classList.add('active');a.setAttribute('aria-current','location');var g=a.closest('details.grp');if(g)g.open=true;if(!q.matches)a.scrollIntoView({block:'nearest'})}})},{rootMargin:'-70px 0px -75% 0px'});
+document.querySelectorAll('main h2[id],main h3[id]').forEach(function(h){o.observe(h)})})();
+</script>
 </body></html>
