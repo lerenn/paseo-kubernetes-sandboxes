@@ -71,7 +71,10 @@ kc() {
   if [ -n "$ctx" ]; then "$kubectl_bin" --context "$ctx" "$@"; else "$kubectl_bin" "$@"; fi
 }
 
-kc exec $tty_flags -n "$ns" "$pod" -c "$container" -- sh -c "$remote" sbx "$state" "$pidfile" "$cwd" "$@" <&0 &
+# A background job gets /dev/null as stdin in some shells (dash) unless stdin is re-opened from
+# another descriptor, so keep a copy of it on fd 3.
+exec 3<&0
+kc exec $tty_flags -n "$ns" "$pod" -c "$container" -- sh -c "$remote" sbx "$state" "$pidfile" "$cwd" "$@" <&3 3<&- &
 child=$!
 
 stopping=
