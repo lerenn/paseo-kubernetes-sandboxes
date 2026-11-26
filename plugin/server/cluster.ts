@@ -12,6 +12,9 @@ const RBAC: [string, string][] = [
   ["create", "pods/exec"],
   ["get", "pods/log"],
   ["get", "persistentvolumeclaims"],
+  ["create", "persistentvolumeclaims"],
+  ["delete", "persistentvolumeclaims"],
+  ["list", "persistentvolumeclaims"],
 ];
 
 // Checks the setup using only the namespace Role of config/plugin-rbac.yaml (and the local kubectl).

@@ -1,5 +1,8 @@
-import type { Configuration } from "../shared/settings.js";
+import { modeOf, type Configuration, type Mode } from "../shared/settings.js";
+import { subPathFor, type RepoInfo } from "./repo.js";
 import {
+  ANNOTATION_MODE,
+  cloneClaimName,
   ANNOTATION_WORKSPACE,
   LABEL_MANAGED,
   LABEL_WORKSPACE,
@@ -18,27 +21,77 @@ export type PodInfo = {
   ready: boolean;
   createdAt: string;
   lastUsed: string | null;
+  mode: Mode;
 };
 
 export const DIND_IMAGE = "docker:27-dind";
 
-export function configError(c: Configuration): string | null {
+export function configError(c: Configuration, mode: Mode = c.defaultMode): string | null {
   if (!c.image) return "Set the sandbox image in Settings.";
-  if (!c.worktree.claimName) return "Set the worktree volume claim in Settings.";
-  if (!c.worktree.mountPath.startsWith("/")) return "Set the worktree mount path (absolute) in Settings.";
+  if (mode === "shared") {
+    if (!c.worktree.claimName) return "Set the worktree volume claim in Settings.";
+    if (!c.worktree.basePath.startsWith("/")) return "Set the worktree base path (absolute) in Settings.";
+  } else if (!c.clone.path.startsWith("/")) return "Set the clone path (absolute) in Settings.";
   return null;
 }
 
-export function buildPod(c: Configuration, workspaceId: string) {
+// Where a launch from `daemonCwd` runs in the pod.
+export function podCwd(c: Configuration, mode: Mode, repo: RepoInfo, daemonCwd: string): string {
+  if (mode === "shared") return daemonCwd;
+  const rel = daemonCwd === repo.root ? "" : daemonCwd.startsWith(repo.root + "/") ? daemonCwd.slice(repo.root.length + 1) : "";
+  return rel ? `${c.clone.path.replace(/\/+$/, "")}/${rel}` : c.clone.path;
+}
+
+export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo: RepoInfo) {
   const name = podName(workspaceId);
   const r = c.resources;
+  const key = workspaceKey(workspaceId);
+  const volumes: Record<string, unknown>[] = [];
+  const mounts: Record<string, unknown>[] = [];
+  const initContainers: Record<string, unknown>[] = [];
+  const env: { name: string; value: string }[] = [];
+  const common = { image: c.image, ...(c.runAsUser ? { securityContext: { runAsUser: c.runAsUser, runAsGroup: c.runAsUser } } : {}) };
+
+  if (mode === "shared") {
+    volumes.push({ name: "worktree", persistentVolumeClaim: { claimName: c.worktree.claimName } });
+    mounts.push({ name: "worktree", mountPath: repo.root, subPath: subPathFor(c.worktree.basePath, c.worktree.subPath, repo.root) });
+    if (repo.gitDir) {
+      const claim = c.repo.claimName || c.worktree.claimName;
+      volumes.push({ name: "repo-git", persistentVolumeClaim: { claimName: claim } });
+      mounts.push({ name: "repo-git", mountPath: repo.gitDir, subPath: subPathFor(c.repo.basePath, c.repo.subPath, repo.gitDir) });
+    }
+    // The daemon's files may belong to another user than the pod's.
+    env.push({ name: "GIT_CONFIG_COUNT", value: "1" }, { name: "GIT_CONFIG_KEY_0", value: "safe.directory" }, { name: "GIT_CONFIG_VALUE_0", value: "*" });
+  } else {
+    if (!repo.remoteUrl) throw new Error("This workspace has no origin remote to clone.");
+    volumes.push(
+      c.clone.storage === "pvc"
+        ? { name: "clone", persistentVolumeClaim: { claimName: cloneClaimName(workspaceId) } }
+        : { name: "clone", emptyDir: {} },
+    );
+    mounts.push({ name: "clone", mountPath: c.clone.path });
+    if (c.clone.gitSecret) {
+      volumes.push({ name: "git", secret: { secretName: c.clone.gitSecret, defaultMode: 0o400 } });
+      mounts.push({ name: "git", mountPath: "/etc/sandbox-git", readOnly: true });
+      env.push({ name: "GIT_CONFIG_GLOBAL", value: "/etc/sandbox-git/gitconfig" });
+    }
+    initContainers.push({
+      ...common,
+      name: "clone",
+      command: ["sh", "-c", '[ -d "$DEST/.git" ] || { git clone "$URL" "$DEST" && { [ -z "$BRANCH" ] || git -C "$DEST" checkout "$BRANCH"; }; }'],
+      env: [...env, { name: "URL", value: repo.remoteUrl }, { name: "DEST", value: c.clone.path }, { name: "BRANCH", value: repo.branch ?? "" }],
+      volumeMounts: mounts,
+    });
+  }
+  if (c.dind) env.push({ name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" });
+
   return {
     apiVersion: "v1",
     kind: "Pod",
     metadata: {
       name,
-      labels: { [LABEL_MANAGED]: MANAGED_BY, [LABEL_WORKSPACE]: workspaceKey(workspaceId) },
-      annotations: { [ANNOTATION_WORKSPACE]: workspaceId },
+      labels: { [LABEL_MANAGED]: MANAGED_BY, [LABEL_WORKSPACE]: key },
+      annotations: { [ANNOTATION_WORKSPACE]: workspaceId, [ANNOTATION_MODE]: mode },
     },
     spec: {
       restartPolicy: "Always",
@@ -46,38 +99,43 @@ export function buildPod(c: Configuration, workspaceId: string) {
       shareProcessNamespace: true,
       terminationGracePeriodSeconds: 5,
       automountServiceAccountToken: false,
+      ...(initContainers.length ? { initContainers } : {}),
       containers: [
         {
+          ...common,
           name: MAIN_CONTAINER,
-          image: c.image,
           command: ["sh", "-c", `mkdir -p ${STATE_DIR}; while :; do sleep 3600 & wait $!; done`],
-          workingDir: c.worktree.mountPath,
+          workingDir: mode === "shared" ? repo.root : c.clone.path,
           ...(c.envSecret ? { envFrom: [{ secretRef: { name: c.envSecret } }] } : {}),
-          ...(c.dind ? { env: [{ name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" }] } : {}),
+          env,
           resources: {
             requests: { cpu: r.cpuRequest, memory: r.memoryRequest },
             limits: { cpu: r.cpuLimit, memory: r.memoryLimit },
           },
-          volumeMounts: [
-            {
-              name: "worktrees",
-              mountPath: c.worktree.mountPath,
-              ...(c.worktree.subPath ? { subPath: c.worktree.subPath } : {}),
-            },
-          ],
+          volumeMounts: mounts,
         },
         ...(c.dind
-          ? [
-              {
-                name: "dind",
-                image: DIND_IMAGE,
-                env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
-                securityContext: { privileged: true },
-              },
-            ]
+          ? [{ name: "dind", image: DIND_IMAGE, env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }], securityContext: { privileged: true } }]
           : []),
       ],
-      volumes: [{ name: "worktrees", persistentVolumeClaim: { claimName: c.worktree.claimName } }],
+      volumes,
+    },
+  };
+}
+
+export function buildClonePvc(c: Configuration, workspaceId: string) {
+  return {
+    apiVersion: "v1",
+    kind: "PersistentVolumeClaim",
+    metadata: {
+      name: cloneClaimName(workspaceId),
+      labels: { [LABEL_MANAGED]: MANAGED_BY, [LABEL_WORKSPACE]: workspaceKey(workspaceId) },
+      annotations: { [ANNOTATION_WORKSPACE]: workspaceId },
+    },
+    spec: {
+      accessModes: ["ReadWriteOnce"],
+      resources: { requests: { storage: c.clone.size } },
+      ...(c.clone.storageClass ? { storageClassName: c.clone.storageClass } : {}),
     },
   };
 }
@@ -96,6 +154,7 @@ function toInfo(p: PodJson): PodInfo {
     ready: !!main?.ready && !p.metadata?.deletionTimestamp,
     createdAt: p.metadata?.creationTimestamp ?? "",
     lastUsed: null,
+    mode: p.metadata?.annotations?.[ANNOTATION_MODE] === "clone" ? "clone" : "shared",
   };
 }
 
@@ -150,13 +209,14 @@ export async function podLogs(run: Kubectl, name: string): Promise<string> {
 const pending = new Map<string, Promise<string>>();
 
 // Returns the pod name once the pod is ready, creating it on first use. Concurrent launches share one creation.
-export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string): Promise<string> {
+export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string, repo: RepoInfo): Promise<string> {
   const name = podName(workspaceId);
   const key = `${c.context}/${c.namespace}/${name}`;
   const running = pending.get(key);
   if (running) return running;
+  const mode = modeOf(c, workspaceId);
   const task = (async () => {
-    const problem = configError(c);
+    const problem = configError(c, mode);
     if (problem) throw new Error(problem);
     let existing: PodJson | undefined;
     try {
@@ -165,16 +225,29 @@ export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string): 
       if (!(e instanceof KubernetesError && e.reason === "missing")) throw e;
     }
     const phase = existing?.status?.phase;
+    if (existing && existing.metadata?.annotations?.[ANNOTATION_MODE] !== mode && phase !== "Failed" && phase !== "Succeeded")
+      throw new Error(`This workspace's pod uses the ${toInfo(existing).mode} storage mode. Delete the pod (Pods tab) to switch to ${mode}.`);
     if (existing && (phase === "Failed" || phase === "Succeeded" || existing.metadata?.deletionTimestamp)) {
       await run(["delete", "pod", name, "--wait=true", "--ignore-not-found"]);
       existing = undefined;
     }
-    if (!existing) await run(["create", "-f", "-"], buildPod(c, workspaceId));
-    await run(["wait", "--for=condition=Ready", `pod/${name}`, "--timeout=120s"]);
+    if (!existing) {
+      const pod = buildPod(c, workspaceId, mode, repo);
+      if (mode === "clone" && c.clone.storage === "pvc") {
+        const have = await run(["get", "pvc", cloneClaimName(workspaceId), "--ignore-not-found", "-o", "name"]);
+        if (!have.trim()) await run(["create", "-f", "-"], buildClonePvc(c, workspaceId));
+      }
+      await run(["create", "-f", "-"], pod);
+    }
+    await run(["wait", "--for=condition=Ready", `pod/${name}`, "--timeout=300s"]);
     return name;
   })().finally(() => pending.delete(key));
   pending.set(key, task);
   return task;
+}
+
+export async function deleteClonePvc(run: Kubectl, workspaceId: string) {
+  await run(["delete", "pvc", cloneClaimName(workspaceId), "--wait=false", "--ignore-not-found"]);
 }
 
 export type SweepResult = { deleted: string[] };
@@ -204,6 +277,17 @@ export async function sweep(
     if (!busy && (orphan || idle)) {
       await run(["delete", "pod", pod.name, "--wait=false", "--ignore-not-found"]);
       deleted.push(pod.name);
+    }
+  }
+  if (opts.knownWorkspaces) {
+    // Clone volumes outlive their pod on purpose; they go when the workspace does.
+    const out = JSON.parse(await run(["get", "pvc", "-l", selector, "-o", "json"])) as { items?: PodJson[] };
+    for (const pvc of out.items ?? []) {
+      const id = pvc.metadata?.annotations?.[ANNOTATION_WORKSPACE] ?? "";
+      if (pvc.metadata?.name && !opts.knownWorkspaces.has(id)) {
+        await run(["delete", "pvc", pvc.metadata.name, "--wait=false", "--ignore-not-found"]);
+        deleted.push(pvc.metadata.name);
+      }
     }
   }
   return { deleted };

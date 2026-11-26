@@ -7,7 +7,7 @@ import { settingsSchema } from "../shared/settings.js";
 import { KubernetesError, connection, type Kubectl } from "./kubectl.js";
 import { checkCluster } from "./cluster.js";
 
-const c = settingsSchema.parse({ image: "i", worktree: { claimName: "wt", mountPath: "/wt" } });
+const c = settingsSchema.parse({ image: "i", worktree: { claimName: "wt", basePath: "/wt" } });
 const version = async () => "v1.37.0";
 
 test("all checks pass with full access", async () => {

@@ -15,3 +15,5 @@ export function workspaceKey(workspaceId: string): string {
 export function podName(workspaceId: string): string {
   return `sbx-${workspaceKey(workspaceId)}`;
 }
+export const ANNOTATION_MODE = "sandbox.paseo.sh/mode";
+export const cloneClaimName = (workspaceId: string) => `${podName(workspaceId)}-clone`;
