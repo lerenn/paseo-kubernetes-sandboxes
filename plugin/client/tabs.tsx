@@ -1,11 +1,11 @@
 import { Text, View } from "react-native";
 import { ExternalLink, Icon } from "@getpaseo/plugin/client/ui";
-import type { z } from "zod";
-import { Badge, Button, Card, Choice, Disclosure, Field, type Theme } from "./components.js";
+import { z } from "zod";
+import { Badge, Button, Card, Choice, Disclosure, Field, JsonField, type Theme } from "./components.js";
 import type { clusterCheck, podsList, workspacesList } from "../shared/contracts.js";
 import type { Configuration } from "../shared/settings.js";
-import { MIN_PASEO_VERSION, modeOf, type Mode } from "../shared/settings.js";
-import { age, phaseTone, plural, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, type Tone } from "./view.js";
+import { MIN_PASEO_VERSION, modeOf, podOverridesSchema, sidecarNamesOf, sidecarProblems, sidecarSchema, type Mode } from "../shared/settings.js";
+import { age, phaseTone, plural, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar, type Tone } from "./view.js";
 
 export type Body = { color: string; fontSize: number; lineHeight: number };
 export type ClusterStatus = z.output<typeof clusterCheck.output>;
@@ -192,6 +192,11 @@ export function WorkspacesTab(p: Common & { draft: Configuration; patch<K extend
                 {(["shared", "clone"] as const).map((m) => (
                   <Button key={m} theme={theme} label={MODE_LABEL[m]} primary={mode === m} disabled={p.busy} onPress={() => p.patch("workspaces", setWorkspaceMode(draft.workspaces, w.id, m === draft.defaultMode ? undefined : m))} />
                 ))}
+                {draft.sidecars.map((s) => {
+                  const current = sidecarNamesOf(draft, w.id);
+                  const on = current.includes(s.name);
+                  return <Button key={s.name} theme={theme} label={`Sidecar ${s.name}: ${on ? "on" : "off"}`} primary={on} disabled={p.busy} onPress={() => p.patch("workspaces", toggleWorkspaceSidecar(draft.workspaces, w.id, current, s.name, !on))} />;
+                })}
               </View>
             )}
           </View>
@@ -202,7 +207,7 @@ export function WorkspacesTab(p: Common & { draft: Configuration; patch<K extend
           <Button theme={theme} label={`Forget ${plural(stale.length, "missing workspace")}`} disabled={p.busy} onPress={() => p.patch("workspaces", draft.workspaces.filter((w) => !stale.includes(w)))} />
         </View>
       )}
-      <Notice theme={theme} text={text}>Shared worktree: the pod works on the daemon's files. Pod-local clone: the pod works on its own clone; Paseo's file tree, diffs and git status do not show it, and unpushed work is lost with the pod unless a volume is used. Switching mode needs the pod deleted first. Changes apply to the next launch.</Notice>
+      <Notice theme={theme} text={text}>Shared worktree: the pod works on the daemon's files. Pod-local clone: the pod works on its own clone; Paseo's file tree, diffs and git status do not show it, and unpushed work is lost with the pod unless a volume is used. Sidecars follow the default selection until toggled here. Switching mode needs the pod deleted first. Changes apply to the next launch.</Notice>
       <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
         <Button theme={theme} label="Save changes" primary disabled={p.busy || !p.ready || p.saved} onPress={p.onSave} />
         <Button theme={theme} label="Refresh" icon="RefreshCw" disabled={p.busy} onPress={p.onRefresh} />
@@ -235,6 +240,13 @@ export function PodsTab(p: { theme: Theme; text: Body; busy: boolean; pods: PodR
           <Text style={text}>
             {MODE_LABEL[pod.mode]} · workspace {pod.workspaceId || "unknown"} · age {age(pod.createdAt)} · last used {pod.lastUsed ? `${age(pod.lastUsed)} ago` : "unknown"}
           </Text>
+          {pod.sidecars.length > 0 && (
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              {pod.sidecars.map((s) => (
+                <Badge key={s.name} theme={theme} label={`${s.name}: ${s.ready ? "Ready" : "Not ready"}`} tone={s.ready ? "success" : "warning"} />
+              ))}
+            </View>
+          )}
           <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
             <Button theme={theme} label="Logs" icon="ScrollText" disabled={p.busy} onPress={() => p.onLogs(pod.name)} />
             {p.deleting === pod.name ? (
@@ -313,7 +325,13 @@ export function SettingsTab(p: Common & { draft: Configuration; patch<K extends 
       <Field theme={theme} label="Run as user ID" value={String(draft.runAsUser)} onChange={(v) => p.patch("runAsUser", Math.max(0, Math.min(65535, Math.floor(Number(v) || 0))))} hint="Match the owner of the daemon's files (usually 1000). 0 keeps the image's user." disabled={p.busy} />
       <Field theme={theme} label="Idle timeout (minutes)" value={String(draft.ttlMinutes)} onChange={(v) => p.patch("ttlMinutes", Math.max(0, Math.min(10080, Math.floor(Number(v) || 0))))} hint="Delete a pod that ran nothing for this long. 0 keeps pods until the workspace is archived." disabled={p.busy} />
       <Field theme={theme} label="Environment Secret" value={draft.envSecret} onChange={(v) => p.patch("envSecret", v)} placeholder="Optional" hint="Name of a Secret in the namespace. Its keys become environment variables in the pod. Use it for credentials instead of environment variables forwarded by Paseo." disabled={p.busy} />
-      <Choice theme={theme} label="Docker-in-Docker sidecar" description="Adds a privileged docker:dind container to each pod and sets DOCKER_HOST. Requires a namespace that allows privileged pods." checked={draft.dind} onChange={(v) => p.patch("dind", v)} disabled={p.busy} />
+      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Sidecars</Text>
+      <JsonField theme={theme} label="Sidecar templates (JSON)" value={draft.sidecars} disabled={p.busy} hint="A list of extra containers. See docs/setup.md (Sidecars) for the fields and a docker example. Applies to pods created afterwards." check={(v) => { const r = z.array(sidecarSchema).max(8).safeParse(v); return r.success ? sidecarProblems({ sidecars: r.data, defaultSidecars: [], workspaces: [] }) : r.error.issues[0]?.message ?? "Invalid sidecars."; }} onChange={(v) => p.patch("sidecars", z.array(sidecarSchema).parse(v))} />
+      {draft.sidecars.map((s) => (
+        <Choice key={s.name} theme={theme} label={`Sidecar ${s.name} by default`} description="Enabled for opted-in workspaces that do not choose their own sidecars (Workspaces tab)." checked={draft.defaultSidecars.includes(s.name)} onChange={(on) => p.patch("defaultSidecars", on ? [...draft.defaultSidecars, s.name] : draft.defaultSidecars.filter((n) => n !== s.name))} disabled={p.busy} />
+      ))}
+      <JsonField theme={theme} label="Pod overrides (JSON)" value={draft.podOverrides} disabled={p.busy} hint="Only runtimeClassName, tolerations, nodeSelector, priorityClassName and imagePullSecrets, for every sandbox pod." check={(v) => { const r = podOverridesSchema.safeParse(v); return r.success ? null : r.error.issues[0]?.message ?? "Invalid pod overrides."; }} onChange={(v) => p.patch("podOverrides", podOverridesSchema.parse(v))} />
+      <Notice theme={theme} text={text} danger>A privileged sidecar is root-equivalent on the node: weaker isolation than the base pod. The namespace's Pod Security level must allow it.</Notice>
       <SaveBar theme={theme} text={text} busy={p.busy} saved={p.saved} ready={p.ready} onSave={p.onSave} />
     </Card>
   );

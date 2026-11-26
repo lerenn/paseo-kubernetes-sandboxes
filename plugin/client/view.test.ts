@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { settingsSchema } from "../shared/settings.js";
-import { age, phaseTone, resourceIssue, setWorkspaceMode, setupSteps, settingsProblems, toggleWorkspace } from "./view.js";
+import { age, phaseTone, resourceIssue, setWorkspaceMode, setWorkspaceSidecars, setupSteps, settingsProblems, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
 
 test("age formats elapsed time", () => {
   const now = Date.parse("2026-01-02T00:00:00Z");
@@ -47,4 +47,13 @@ test("resourceIssue validates quantities", () => {
   assert.equal(resourceIssue("CPU", "500m"), null);
   assert.equal(resourceIssue("Memory", "2Gi"), null);
   assert.match(resourceIssue("CPU", "lots")!, /Kubernetes quantity/);
+});
+
+test("workspace sidecar choices keep the mode and return to the defaults", () => {
+  assert.deepEqual(setWorkspaceSidecars([{ id: "a", mode: "clone" }], "a", ["x"]), [{ id: "a", mode: "clone", sidecars: ["x"] }]);
+  assert.deepEqual(setWorkspaceSidecars([{ id: "a", sidecars: ["x"] }], "a", undefined), [{ id: "a" }]);
+  assert.deepEqual(setWorkspaceMode([{ id: "a", sidecars: [] }], "a", "clone"), [{ id: "a", sidecars: [], mode: "clone" }]);
+  assert.deepEqual(setWorkspaceMode([{ id: "a", mode: "clone", sidecars: [] }], "a", undefined), [{ id: "a", sidecars: [] }]);
+  assert.deepEqual(toggleWorkspaceSidecar([{ id: "a" }], "a", ["x"], "y", true), [{ id: "a", sidecars: ["x", "y"] }]);
+  assert.deepEqual(toggleWorkspaceSidecar([{ id: "a" }], "a", ["x"], "x", false), [{ id: "a", sidecars: [] }]);
 });

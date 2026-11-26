@@ -1,5 +1,5 @@
 // Pure helpers for the screen (no React, unit-tested).
-import { modeOf, type Configuration, type Mode } from "../shared/settings.js";
+import { QUANTITY, modeOf, type Configuration, type Mode } from "../shared/settings.js";
 
 export type Tone = "muted" | "success" | "warning";
 export type CheckLike = { id: string; status: "ok" | "warn" | "fail" | "unknown" };
@@ -68,10 +68,21 @@ export function toggleWorkspace(entries: Entry[], id: string, on: boolean): Entr
 }
 // `undefined` returns the workspace to the default mode.
 export function setWorkspaceMode(entries: Entry[], id: string, mode: Mode | undefined): Entry[] {
-  return entries.map((e) => (e.id === id ? (mode ? { id, mode } : { id }) : e));
+  return entries.map((e) => (e.id === id ? withoutKey({ ...e, ...(mode ? { mode } : {}) }, mode ? null : "mode") : e));
+}
+// `undefined` returns the workspace to the default sidecars; `[]` means none.
+export function setWorkspaceSidecars(entries: Entry[], id: string, names: string[] | undefined): Entry[] {
+  return entries.map((e) => (e.id === id ? withoutKey({ ...e, ...(names ? { sidecars: names } : {}) }, names ? null : "sidecars") : e));
+}
+// Toggles one sidecar for a workspace, starting from the sidecars it currently has.
+export function toggleWorkspaceSidecar(entries: Entry[], id: string, current: string[], name: string, on: boolean): Entry[] {
+  return setWorkspaceSidecars(entries, id, on ? [...new Set([...current, name])] : current.filter((n) => n !== name));
+}
+function withoutKey(e: Entry, key: "mode" | "sidecars" | null): Entry {
+  if (key) delete e[key];
+  return e;
 }
 
-const QUANTITY = /^(\d+\.?\d*|\.\d+)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/;
 export const validQuantity = (v: string) => QUANTITY.test(v.trim());
 export function resourceIssue(label: string, value: string): string | null {
   return validQuantity(value) ? null : `${label} must be a Kubernetes quantity, for example 500m or 2Gi.`;

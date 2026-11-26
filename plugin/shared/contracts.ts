@@ -17,6 +17,7 @@ export const podInfo = z.object({
   createdAt: z.string(),
   lastUsed: z.string().nullable(),
   mode: z.enum(["shared", "clone"]),
+  sidecars: z.array(z.object({ name: z.string(), ready: z.boolean() })),
 });
 
 // Cluster, RBAC and volume checks. Never needs more than the RBAC Role in config/plugin-rbac.yaml.

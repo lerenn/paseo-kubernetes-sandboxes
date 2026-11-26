@@ -377,3 +377,45 @@ export function Card({
     </View>
   );
 }
+
+// Edits a JSON value as text. The value is passed on only while the text parses and `check` accepts it.
+export function JsonField({
+  theme,
+  label,
+  value,
+  onChange,
+  check,
+  hint,
+  disabled = false,
+}: {
+  theme: Theme;
+  label: string;
+  value: unknown;
+  onChange(value: unknown): void;
+  check(value: unknown): string | null;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(() => JSON.stringify(value, null, 2));
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <Field
+      theme={theme}
+      label={label}
+      value={text}
+      disabled={disabled}
+      hint={error ?? hint}
+      onChange={(t) => {
+        setText(t);
+        try {
+          const v = JSON.parse(t);
+          const problem = check(v);
+          setError(problem);
+          if (!problem) onChange(v);
+        } catch {
+          setError("Not valid JSON yet; the change is not applied.");
+        }
+      }}
+    />
+  );
+}
