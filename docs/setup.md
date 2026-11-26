@@ -177,10 +177,65 @@ Do not treat this setup as a security boundary.
 - Whether a namespace that denies privileged pods gives a readable error.
 - Nested resource limits: the sidecar's limits apply to the sidecar container, not per docker container.
 
+## Git over SSH
+
+Lets pods clone and push private repositories over SSH without you creating a Secret by hand. The plugin
+manages one Secret, `paseo-sandbox-ssh`, in the sandbox namespace (labelled
+`app.kubernetes.io/managed-by=paseo-kubernetes-sandboxes`).
+
+**Setup** (Cluster tab):
+
+1. Create a **dedicated** key: a deploy key or a machine user limited to the repositories agents work on.
+2. **SSH key file**: absolute path of the private key on the Paseo *daemon host*.
+3. **known_hosts file**: absolute path of a file on the daemon host that pins the git hosts' keys (for
+   example the `github.com` lines you verified yourself). It is required with a key. The plugin never
+   fetches host keys at runtime, and never reads `~/.ssh` or any other file than the two you name.
+4. Save. The Secret is created when the next pod is created, re-synced when the file content changes
+   (checked every minute, by comparing a SHA-256 annotation) and on every pod creation. The Cluster tab
+   shows whether it is present, the first 8 hex digits of the hash, whether it matches the files and
+   when it was synced. **Sync Secret** forces a sync; **Remove Secret** deletes it (it comes back with the
+   next pod while a key is configured: clear the key file setting first to stop that).
+
+**What pods get.** The Secret is mounted read-only (mode `0400`) at `/etc/sandbox-ssh` in the main
+container and, in clone mode, in the `clone` init container, so the existing clone step works on
+`git@host:...` URLs unchanged. Both get
+`GIT_SSH_COMMAND=ssh -i /etc/sandbox-ssh/ssh-privatekey -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/sandbox-ssh/known_hosts -o GlobalKnownHostsFile=/dev/null`.
+Sidecars never get the Secret or the variable. The image needs an `ssh` client.
+
+The key is written with `kubectl create`/`replace` reading the manifest on stdin (never `apply`, which
+would copy the data into an annotation, and never argv). The plugin never logs key material or kubectl's
+stderr. It reads the Secret's annotations only, never its data.
+
+**Relation to Git Secret** (`clone.gitSecret`, unchanged). Git Secret mounts a Secret you manage at
+`/etc/sandbox-git` and points `GIT_CONFIG_GLOBAL` at its `gitconfig` key (HTTPS credential helper, etc.).
+The two use different volumes, paths and variables and can be used together: use Git Secret for HTTPS
+remotes, Git over SSH for `git@` remotes. If your `gitconfig` sets `core.sshCommand`, the plugin's
+`GIT_SSH_COMMAND` wins (git gives the environment variable precedence).
+
+**RBAC.** Apply the updated `config/plugin-rbac.yaml`: `create` on `secrets` (Kubernetes cannot restrict
+create by name) and `get, update, patch, delete` only on the Secret named `paseo-sandbox-ssh`. **Check
+cluster** verifies these with `kubectl auth can-i` when a key is configured.
+
+**Threat notes.**
+
+- The key is readable by every process in the pod (agents, their tools, anything they run), by anyone with
+  Secret read access in the namespace, and by the daemon's cluster identity, which can read it back.
+- Use a dedicated deploy key or machine user limited to the repositories agents work on, and revoke it if
+  a pod or the namespace is suspect.
+- This plugin gives resource and process isolation only. It is not a security boundary, and nothing
+  here makes secrets safe from code running in the pod.
+
+**Not tested on a real cluster:** use of the Secret by the clone init container; the permissions and owner
+of the mounted key for a non-root `runAsUser` (a `0400` file owned by root may be unreadable to uid 1000
+without a matching `fsGroup`; ssh also needs the uid to exist in the image's passwd); the behaviour of
+`GIT_SSH_COMMAND` with real hosts; propagation of a Secret update to running pods (kubelet refreshes
+mounts after a delay; the plugin does not restart pods); the `kubectl create`/`replace` flow and the RBAC
+rules on a real API server.
+
 ## Secrets
 
 Forwarded environment values travel as `kubectl exec` arguments: they are visible to local `ps` and in
-the pod. Put credentials in a Secret (**Environment Secret**, or **Git Secret** for git) instead.
+the pod. Put credentials in a Secret (**Environment Secret**, **Git Secret** for git over HTTPS, or Git over SSH above) instead.
 
 ## Limits
 
@@ -192,7 +247,7 @@ the pod. Put credentials in a Secret (**Environment Secret**, or **Git Secret** 
   TERM, INT and HUP are handled by killing the remote process.
 - Worktree teardown commands use an existing pod and run locally if there is none (not verified against a
   real daemon: the order of archive and teardown is unconfirmed).
-- Not tested: specific agents, port forwarding, file views, long idle connections, clone mode on a real
+- Not tested: Git over SSH (see its section), specific agents, port forwarding, file views, long idle connections, clone mode on a real
   cluster.
 - **Unverified basis.** Paseo's source for worktree creation was not read. The shared layout comes from the
   documentation and one live worktree (worktrees under `$PASEO_HOME/worktrees/<hash>/<name>`, `.git` file

@@ -13,6 +13,7 @@ import {
   workspaceKey,
 } from "../shared/sandbox.js";
 import { KubernetesError, type Kubectl } from "./kubectl.js";
+import { gitSshCommand, sshConfigured, sshMount, sshVolume, syncSsh, type ReadFile } from "./ssh.js";
 
 export type PodInfo = {
   name: string;
@@ -53,9 +54,9 @@ const quantities = (r: Sidecar["resources"], kind: "Request" | "Limit") => {
 };
 
 // A regular container (not a native sidecar) so that the pod's Ready condition waits for its probe.
-// It gets the main container's workspace mounts at the same absolute paths, never the git Secret.
+// It gets the main container's workspace mounts at the same absolute paths, never the git or SSH Secrets.
 function sidecarContainer(s: Sidecar, mounts: Record<string, unknown>[], volumes: Record<string, unknown>[]) {
-  const volumeMounts = s.mountWorkspace ? mounts.filter((m) => m.name !== "git").map((m) => ({ ...m })) : [];
+  const volumeMounts = s.mountWorkspace ? mounts.filter((m) => m.name !== "git" && m.name !== "ssh").map((m) => ({ ...m })) : [];
   if (s.stateVolume) {
     volumes.push({ name: `state-${s.name}`, emptyDir: { sizeLimit: s.stateVolume.sizeLimit } });
     volumeMounts.push({ name: `state-${s.name}`, mountPath: s.stateVolume.path });
@@ -97,6 +98,14 @@ export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo
   const initContainers: Record<string, unknown>[] = [];
   const env: { name: string; value: string }[] = [];
   const common = { image: c.image, ...(c.runAsUser ? { securityContext: { runAsUser: c.runAsUser, runAsGroup: c.runAsUser } } : {}) };
+
+  // Git over SSH: mounted read-only in the main container and, in clone mode, the clone init container
+  // (both receive `mounts` and `env`). Sidecars never get it (see sidecarContainer).
+  if (sshConfigured(c)) {
+    volumes.push(sshVolume());
+    mounts.push(sshMount());
+    env.push({ name: "GIT_SSH_COMMAND", value: gitSshCommand() });
+  }
 
   if (mode === "shared") {
     volumes.push({ name: "worktree", persistentVolumeClaim: { claimName: c.worktree.claimName } });
@@ -264,7 +273,7 @@ export async function podLogs(run: Kubectl, name: string): Promise<string> {
 const pending = new Map<string, Promise<string>>();
 
 // Returns the pod name once the pod is ready, creating it on first use. Concurrent launches share one creation.
-export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string, repo: RepoInfo): Promise<string> {
+export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string, repo: RepoInfo, read?: ReadFile): Promise<string> {
   const name = podName(workspaceId);
   const key = `${c.context}/${c.namespace}/${name}`;
   const running = pending.get(key);
@@ -288,6 +297,8 @@ export function ensurePod(run: Kubectl, c: Configuration, workspaceId: string, r
     }
     if (!existing) {
       const pod = buildPod(c, workspaceId, mode, repo);
+      // The Secret must exist before the pod that mounts it.
+      await syncSsh(run, c, read);
       if (mode === "clone" && c.clone.storage === "pvc") {
         const have = await run(["get", "pvc", cloneClaimName(workspaceId), "--ignore-not-found", "-o", "name"]);
         if (!have.trim()) await run(["create", "-f", "-"], buildClonePvc(c, workspaceId));

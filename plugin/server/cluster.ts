@@ -1,6 +1,8 @@
 import type { Configuration } from "../shared/settings.js";
 import { KubernetesError, type Kubectl } from "./kubectl.js";
 import { configError } from "./pods.js";
+import { SSH_SECRET_NAME } from "../shared/sandbox.js";
+import { sshConfigured } from "./ssh.js";
 
 export type Check = { id: string; label: string; status: "ok" | "warn" | "fail" | "unknown"; detail: string };
 
@@ -41,7 +43,11 @@ export async function checkCluster(
   }
   const missing: string[] = [];
   let reachable = true;
-  for (const [verb, resource] of RBAC) {
+  // Secret rights are only needed with Git over SSH. `auth can-i` answers yes/no; no Secret is ever read.
+  const rights: [string, string][] = sshConfigured(c)
+    ? [...RBAC, ["create", "secrets"] as [string, string], ...["get", "update", "patch", "delete"].map((v): [string, string] => [v, `secrets/${SSH_SECRET_NAME}`])]
+    : RBAC;
+  for (const [verb, resource] of rights) {
     try {
       const answer = (await run(["auth", "can-i", verb, resource])).trim();
       if (answer !== "yes") missing.push(`${verb} ${resource}`);
