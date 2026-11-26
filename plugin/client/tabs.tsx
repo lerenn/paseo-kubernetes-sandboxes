@@ -118,7 +118,7 @@ export function OverviewTab(p: Common & { saved_: Configuration; status: Cluster
   );
 }
 
-export function ClusterTab(p: Common & { draft: Configuration; patch<K extends keyof Configuration>(k: K, v: Configuration[K]): void; status: ClusterStatus | null; onCheck(): void; ssh: SshStatus | null; onSshRefresh(): void; onSshSync(): void; onSshRemove(): void }) {
+export function ClusterTab(p: Common & { contexts: string[] | null; onContexts(): void; draft: Configuration; patch<K extends keyof Configuration>(k: K, v: Configuration[K]): void; status: ClusterStatus | null; onCheck(): void; ssh: SshStatus | null; onSshRefresh(): void; onSshSync(): void; onSshRemove(): void }) {
   const { theme, text, draft } = p;
   const failing = p.status?.checks.some((c) => c.status === "fail");
   return (
@@ -129,13 +129,21 @@ export function ClusterTab(p: Common & { draft: Configuration; patch<K extends k
       description="Where sandbox pods run. Uses the kubectl of the Paseo daemon host."
       badge={p.status && <Badge theme={theme} label={failing ? "Needs attention" : "Ready"} tone={failing ? "warning" : "success"} />}
     >
-      <Field theme={theme} label="Kubernetes context" value={draft.context} onChange={(v) => p.patch("context", v)} placeholder="Use current context" hint="Leave empty to use kubectl's current context." disabled={p.busy} />
+      <Field theme={theme} label="Kubeconfig file" value={draft.kubeconfigFile} onChange={(v) => p.patch("kubeconfigFile", v)} placeholder="Optional, absolute path on the daemon host" error={problemOf(draftProblems(draft), "kubeconfigFile")} hint="A narrow identity limited to the sandbox namespace is best; the file is read on the daemon host (by kubectl, never by the plugin). Default: empty, kubectl's own configuration (KUBECONFIG, ~/.kube/config or the in-cluster identity)." disabled={p.busy} />
+      <Field theme={theme} label="Kubernetes context" value={draft.context} onChange={(v) => p.patch("context", v)} placeholder="Use current context" hint="Leave empty to use the current context of the kubeconfig." disabled={p.busy} />
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <Button theme={theme} label="List contexts of the saved kubeconfig" icon="List" disabled={p.busy || !p.saved} onPress={p.onContexts} />
+        {p.contexts?.map((name) => (
+          <Button key={name} theme={theme} label={name} primary={draft.context === name} disabled={p.busy} onPress={() => p.patch("context", name)} />
+        ))}
+        {p.contexts && !p.contexts.length && <Text style={text}>No context found: the file is missing, unreadable or empty.</Text>}
+      </View>
       <Field theme={theme} label="Namespace" value={draft.namespace} onChange={(v) => p.patch("namespace", v)} hint="Must already exist. Apply config/plugin-rbac.yaml in it." disabled={p.busy} />
       {p.status && (
         <View style={{ gap: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Icon name="Network" size={15} color={theme.colors.foregroundMuted} />
-            <Text style={text}>{p.status.context} · {p.status.namespace}</Text>
+            <Text style={text}>{p.status.context} · {p.status.namespace}{p.status.kubeconfigFile ? ` · kubeconfig ${p.status.kubeconfigFile}` : ""}</Text>
           </View>
           {p.status.checks.map((c) => (
             <View key={c.id} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>

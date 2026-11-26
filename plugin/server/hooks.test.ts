@@ -78,3 +78,9 @@ test("teardown reuses a ready pod and never creates one", async () => {
   assert.deepEqual(calls, ["get"]);
   assert.ok(await wrapFor(deps(ready), { workspaceId: "w1", cwd: "/wt", env: {}, reuseOnly: true }));
 });
+
+test("buildWrap passes the kubeconfig as one argument before the context, only when set", () => {
+  const w = buildWrap({ context: "c", namespace: "n", kubeconfigFile: "/a b/kc" }, "p", { cwd: "/w", envNames: [], launcher: "/l" });
+  assert.deepEqual(w.slice(1, 5), ["--kubeconfig", "/a b/kc", "--context", "c"]);
+  assert.ok(!buildWrap({ context: "c", namespace: "n" }, "p", { cwd: "/w", envNames: [], launcher: "/l" }).includes("--kubeconfig"));
+});

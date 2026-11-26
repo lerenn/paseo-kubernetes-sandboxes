@@ -130,6 +130,10 @@ export const workspaceEntry = z.object({
 
 const baseSchema = z.object({
   context: z.string().max(200).default(""),
+  // Absolute path of a kubeconfig file on the DAEMON HOST, passed to kubectl as --kubeconfig. Empty: kubectl's own
+  // default (KUBECONFIG, ~/.kube/config, or the in-cluster identity). Only the path is stored; the file is never
+  // read by the plugin and its content is never logged.
+  kubeconfigFile: absolutePath.default(""),
   namespace: resourceName.default("paseo-sandboxes"),
   // Must contain a shell, git and every program an agent or terminal will run.
   image: z.string().max(500).default(""),

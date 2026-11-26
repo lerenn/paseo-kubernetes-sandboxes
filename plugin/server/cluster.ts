@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import type { Configuration } from "../shared/settings.js";
 import { KubernetesError, type Kubectl } from "./kubectl.js";
 import { configError } from "./pods.js";
@@ -19,12 +20,22 @@ const RBAC: [string, string][] = [
   ["list", "persistentvolumeclaims"],
 ];
 
+// Why a kubeconfig path cannot be used, or null. Looks at the path only; the file is never read here.
+export async function kubeconfigProblem(path: string, status: (p: string) => Promise<{ isFile(): boolean }> = stat): Promise<string | null> {
+  try {
+    return (await status(path)).isFile() ? null : `The kubeconfig path ${path} is not a file.`;
+  } catch {
+    return `The kubeconfig file ${path} does not exist or is not readable on the daemon host.`;
+  }
+}
+
 // Checks the setup using only the namespace Role of config/plugin-rbac.yaml (and the local kubectl).
 export async function checkCluster(
   c: Configuration,
   run: Kubectl,
   version: () => Promise<string>,
-): Promise<{ context: string; namespace: string; checks: Check[] }> {
+  kubeconfig: (path: string) => Promise<string | null> = kubeconfigProblem,
+): Promise<{ context: string; namespace: string; kubeconfigFile: string; checks: Check[] }> {
   const checks: Check[] = [];
   let context = c.context;
   try {
@@ -32,7 +43,15 @@ export async function checkCluster(
     checks.push({ id: "kubectl", label: "kubectl installed", status: "ok", detail: v });
   } catch {
     checks.push({ id: "kubectl", label: "kubectl installed", status: "fail", detail: "kubectl was not found on the daemon host." });
-    return { context, namespace: c.namespace, checks };
+    return { context, namespace: c.namespace, kubeconfigFile: c.kubeconfigFile, checks };
+  }
+  if (c.kubeconfigFile) {
+    const problem = await kubeconfig(c.kubeconfigFile);
+    if (problem) {
+      checks.push({ id: "kubeconfig", label: "kubeconfig file", status: "fail", detail: problem });
+      return { context: c.context, namespace: c.namespace, kubeconfigFile: c.kubeconfigFile, checks };
+    }
+    checks.push({ id: "kubeconfig", label: "kubeconfig file", status: "ok", detail: `Using ${c.kubeconfigFile}` });
   }
   if (!context) {
     try {
@@ -62,7 +81,7 @@ export async function checkCluster(
   checks.push(
     !reachable
       ? { id: "cluster", label: "Cluster reachable", status: "fail", detail: "kubectl could not reach the cluster. Check the context and your credentials." }
-      : { id: "cluster", label: "Cluster reachable", status: "ok", detail: `${context} · ${c.namespace}` },
+      : { id: "cluster", label: "Cluster reachable", status: "ok", detail: `${context} · ${c.namespace}${c.kubeconfigFile ? ` · kubeconfig ${c.kubeconfigFile}` : ""}` },
   );
   if (reachable)
     checks.push(
@@ -96,5 +115,5 @@ export async function checkCluster(
       ? { id: "settings", label: "Settings", status: "fail", detail: problem }
       : { id: "settings", label: "Settings", status: "ok", detail: "Image, volume claim and mount path are set." },
   );
-  return { context, namespace: c.namespace, checks };
+  return { context, namespace: c.namespace, kubeconfigFile: c.kubeconfigFile, checks };
 }

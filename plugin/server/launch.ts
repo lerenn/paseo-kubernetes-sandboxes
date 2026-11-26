@@ -9,12 +9,13 @@ export const launcherPath = () => join(dirname(fileURLToPath(import.meta.url)), 
 
 // The wrap Paseo prepends to the command. It ends with `--` because Paseo appends the command directly.
 export function buildWrap(
-  c: Pick<Configuration, "context" | "namespace">,
+  c: Pick<Configuration, "context" | "namespace"> & { kubeconfigFile?: string },
   pod: string,
   opts: { cwd: string; envNames: string[]; launcher?: string },
 ): Wrap {
   return [
     opts.launcher ?? launcherPath(),
+    ...(c.kubeconfigFile ? ["--kubeconfig", c.kubeconfigFile] : []),
     ...(c.context ? ["--context", c.context] : []),
     "--namespace",
     c.namespace,

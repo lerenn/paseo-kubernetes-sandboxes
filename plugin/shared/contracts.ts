@@ -27,8 +27,17 @@ export const clusterCheck = defineRpc({
   output: z.object({
     context: z.string(),
     namespace: z.string(),
+    // The kubeconfig path used (empty: kubectl's default). Path only, never content.
+    kubeconfigFile: z.string(),
     checks: z.array(check),
   }),
+});
+
+// Context names found in the configured kubeconfig (read-only `kubectl config get-contexts -o name`).
+export const clusterContexts = defineRpc({
+  name: "cluster.contexts",
+  input: z.object({}),
+  output: z.object({ contexts: z.array(z.string()) }),
 });
 
 export const podsList = defineRpc({

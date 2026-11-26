@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { ExternalLink, Loading, ScrollView, Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { sandboxSettings, settingsSchema, type Configuration } from "../shared/settings.js";
-import { clusterCheck, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "../shared/contracts.js";
+import { clusterCheck, clusterContexts, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "../shared/contracts.js";
 import { draftProblems } from "./view.js";
 import { ClusterTab, OverviewTab, PodsTab, SettingsTab, WorkspacesTab, type ClusterStatus, type SshStatus, type PodRows, type TabId, type WorkspaceRows } from "./tabs.js";
 
@@ -19,6 +19,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   const settings = useSettings(sandboxSettings);
   const toast = useToast();
   const checkRpc = useRpc(clusterCheck),
+    contextsRpc = useRpc(clusterContexts),
     listPodsRpc = useRpc(podsList),
     deletePodRpc = useRpc(podsDelete),
     logsRpc = useRpc(podsLogs),
@@ -26,6 +27,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     sshStatusRpc = useRpc(sshStatus),
     sshSyncRpc = useRpc(sshSync),
     sshRemoveRpc = useRpc(sshRemove);
+  const [contexts, setContexts] = useState<string[] | null>(null);
   const [ssh, setSsh] = useState<SshStatus | null>(null);
   const [draft, setDraft] = useState<Configuration>(settingsSchema.parse({}));
   const [tab, setTab] = useState<TabId>("overview");
@@ -76,6 +78,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
       if (current.status !== "ready") return;
       if (!(await current.save(settingsSchema.parse(draft), current.revision))) throw new Error("Settings changed. Reload and try again.");
       setStatus(null);
+      setContexts(null);
       toast.show("Settings saved.");
     });
   const text = { color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 21 };
@@ -124,7 +127,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           )}
           {settings.status === "invalid" && <Text style={text}>The saved settings are invalid. Save new values to replace them.</Text>}
           {tab === "overview" && <OverviewTab {...common} saved_={savedValues} status={status} pods={pods} go={setTab} />}
-          {tab === "cluster" && <ClusterTab {...common} draft={draft} patch={patch} status={status} onCheck={() => void action(runCheck)} ssh={ssh} onSshRefresh={() => void action(async () => setSsh(await sshStatusRpc({})))} onSshSync={() => void action(async () => { setSsh(await sshSyncRpc({})); toast.show("SSH Secret synced."); })} onSshRemove={() => void action(async () => { setSsh(await sshRemoveRpc({})); toast.show("SSH Secret removed."); })} />}
+          {tab === "cluster" && <ClusterTab {...common} contexts={contexts} onContexts={() => void action(async () => setContexts((await contextsRpc({})).contexts))} draft={draft} patch={patch} status={status} onCheck={() => void action(runCheck)} ssh={ssh} onSshRefresh={() => void action(async () => setSsh(await sshStatusRpc({})))} onSshSync={() => void action(async () => { setSsh(await sshSyncRpc({})); toast.show("SSH Secret synced."); })} onSshRemove={() => void action(async () => { setSsh(await sshRemoveRpc({})); toast.show("SSH Secret removed."); })} />}
           {tab === "workspaces" && <WorkspacesTab {...common} draft={draft} patch={patch} rows={rows} onRefresh={() => void action(loadWorkspaces)} />}
           {tab === "pods" && (
             <PodsTab

@@ -84,7 +84,7 @@ export function requirementRows(saved: Configuration, checks: CheckLike[] | null
   const find = (id: string) => checks?.find((c) => c.id === id);
   // Why a row has no result: no check yet, or the check stopped before reaching it.
   const missing = (): string =>
-    !checks ? NOT_CHECKED : find("kubectl")?.status === "fail" ? "Cannot verify: kubectl is not available." : find("cluster")?.status === "fail" ? "Cannot verify: the cluster is unreachable." : NOT_CHECKED;
+    !checks ? NOT_CHECKED : find("kubectl")?.status === "fail" ? "Cannot verify: kubectl is not available." : find("kubeconfig")?.status === "fail" ? "Cannot verify: the kubeconfig file cannot be used." : find("cluster")?.status === "fail" ? "Cannot verify: the cluster is unreachable." : NOT_CHECKED;
   const row = (id: string, label: string, description: string): Requirement => {
     const c = find(id);
     return { id, label, description, indicator: indicatorOf(c?.status), detail: c ? c.detail || "" : missing() };
@@ -99,6 +99,7 @@ export function requirementRows(saved: Configuration, checks: CheckLike[] | null
       detail: "Paseo enforces this when it loads the plugin: this screen is shown, so it is met.",
     },
     row("kubectl", "kubectl", "Installed on the daemon host."),
+    ...(saved.kubeconfigFile ? [row("kubeconfig", "kubeconfig file", "The file set in the Cluster tab exists on the daemon host.")] : []),
     row("cluster", "Cluster and namespace", "The cluster answers kubectl and the sandbox namespace is reachable."),
     row("rbac", "Cluster access (RBAC)", "The Role of config/plugin-rbac.yaml is bound to your identity."),
     row("settings", "Sandbox settings", "Image, volume claim and paths are set."),
@@ -165,6 +166,7 @@ export function draftProblems(c: Configuration): Problem[] {
   }
   out.push(...name("worktree.claimName", "Worktree claim", c.worktree.claimName), ...name("repo.claimName", "Repository claim", c.repo.claimName));
   out.push(...absolute("worktree.basePath", "Worktree base path", c.worktree.basePath), ...absolute("repo.basePath", "Repository base path", c.repo.basePath));
+  out.push(...absolute("kubeconfigFile", "Kubeconfig file", c.kubeconfigFile));
   out.push(...absolute("clone.path", "Clone path", c.clone.path));
   if (c.clone.storage === "pvc") {
     const issue = resourceIssue("Volume size", c.clone.size);

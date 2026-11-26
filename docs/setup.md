@@ -45,7 +45,8 @@ Open **Kubernetes Sandbox** in the Paseo sidebar.
 
 1. **Settings**: image, CPU and memory, the default storage mode and its settings (below), run-as user,
    idle timeout, optional environment Secret, optional sidecars and pod overrides (see Sidecars).
-2. **Cluster**: context and namespace, then **Check cluster** (kubectl, access, RBAC, volume claim).
+2. **Cluster**: optional kubeconfig file (see Kubeconfig file), context and namespace, then **Check cluster**
+   (kubectl, kubeconfig file, access, RBAC, volume claim).
 3. **Workspaces**: tick the workspaces that run in a pod, pick a storage mode for each (or keep the
    default), then **Save changes**. The mode of each workspace shows on the Overview and Pods tabs.
 
@@ -184,6 +185,30 @@ Do not treat this setup as a security boundary.
 - Eviction when the state volume or ephemeral storage limit is exceeded.
 - Whether a namespace that denies privileged pods gives a readable error.
 - Nested resource limits: the sidecar's limits apply to the sidecar container, not per docker container.
+
+## Kubeconfig file
+
+Optional. By default the plugin uses kubectl's own configuration on the Paseo *daemon host* (`KUBECONFIG`,
+`~/.kube/config`, or the in-cluster identity when the daemon runs in a pod). **Kubeconfig file** (Cluster tab)
+is the absolute path of a kubeconfig file on the daemon host. When set, the plugin passes
+`--kubeconfig <path>` to every `kubectl` call it makes, and to the launcher (`kube-exec.sh --kubeconfig`), so
+agents, terminals and commands run through `kubectl exec` use the same identity. The path travels as one
+argument (never through a shell), so spaces are fine.
+
+- **Use a dedicated, narrow identity**: a ServiceAccount or user limited to the sandbox namespace and the
+  Role of `config/plugin-rbac.yaml`, not your admin kubeconfig. The file's credentials are used by kubectl on
+  the daemon host; the plugin stores only the path, never reads the file, and never logs its content.
+- `--kubeconfig` makes kubectl use only that file: `KUBECONFIG` and `~/.kube/config` are not merged in.
+- The **context** field then selects a context of that file (empty: the file's current context). **List
+  contexts of the saved kubeconfig** shows the names found (`kubectl config get-contexts -o name`).
+- If the file uses an exec credential plugin (for example `aws`, `gke-gcloud-auth-plugin`), that program must
+  exist on the daemon host and work non-interactively, because kubectl runs it there.
+- **Check cluster** reports the file path and context it used (path only) and fails with a clear message if
+  the file is missing or is not a file. The Overview card shows a "kubeconfig file" row.
+
+Not tested: a real cluster with a kubeconfig file, exec credential plugins, and kubeconfigs with several
+contexts. Tested with a fake `kubectl`: the arguments passed (including paths with spaces), the launcher
+option, and the Check cluster messages.
 
 ## Git over SSH
 

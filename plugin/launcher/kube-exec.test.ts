@@ -82,3 +82,20 @@ test("on SIGTERM it kills the remote process through a second exec", async () =>
   assert.equal(calls(f).filter((c) => c.startsWith("exec")).length, 2);
   assert.deepEqual(readdirSync(f.state).filter((n) => n.startsWith("pid.")), []);
 });
+
+test("--kubeconfig reaches every kubectl call, with and without a context, spaces included", () => {
+  const f = fixture();
+  const path = "/tmp/kube dir/my config";
+  const r = spawnSync(launcher, ["--kubeconfig", path, "--context", "c1", ...base(f), "--", "true"], { env: f.env });
+  assert.equal(r.status, 0);
+  const all = calls(f);
+  assert.ok(all.length >= 1);
+  for (const l of all) assert.ok(l.startsWith(`--kubeconfig ${path} --context c1 exec `), l);
+  const g = fixture();
+  spawnSync(launcher, ["--kubeconfig", path, ...base(g), "--", "true"], { env: g.env });
+  for (const l of calls(g)) assert.ok(l.startsWith(`--kubeconfig ${path} exec `), l);
+  const h = fixture();
+  spawnSync(launcher, [...base(h), "--", "true"], { env: h.env });
+  for (const l of calls(h)) assert.ok(!l.includes("--kubeconfig"), l);
+  assert.equal(spawnSync(launcher, ["--kubeconfig"], { env: f.env }).status, 64);
+});

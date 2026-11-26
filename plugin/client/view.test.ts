@@ -153,3 +153,13 @@ test("draftProblems reports sidecar and ssh problems", () => {
   assert.match(problemOf(draftProblems(ssh), "ssh")!, /known_hosts/);
   assert.ok(ADVANCED_FIELDS.includes("sidecars") && !ADVANCED_FIELDS.includes("worktree.basePath"));
 });
+
+test("a kubeconfig row appears only when a file is set, and relative paths are a problem", () => {
+  const withFile = { ...DEFAULTS, kubeconfigFile: "/k" };
+  assert.equal(byId(requirementRows(DEFAULTS, null)).kubeconfig, undefined);
+  const rows = byId(requirementRows(withFile, [{ id: "kubectl", status: "ok" }, { id: "kubeconfig", status: "fail", detail: "gone" }]));
+  assert.equal(rows.kubeconfig.indicator, "failed");
+  assert.match(rows.cluster.detail, /kubeconfig file cannot be used/);
+  assert.ok(problemOf(draftProblems({ ...DEFAULTS, kubeconfigFile: "rel/kc" }), "kubeconfigFile"));
+  assert.equal(problemOf(draftProblems(withFile), "kubeconfigFile"), undefined);
+});
