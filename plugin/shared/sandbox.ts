@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const MANAGED_BY = "paseo-kubernetes-sandbox";
+export const MANAGED_BY = "paseo-kubernetes-sandboxes";
 export const LABEL_MANAGED = "app.kubernetes.io/managed-by";
 export const LABEL_WORKSPACE = "sandbox.paseo.sh/workspace";
 export const ANNOTATION_WORKSPACE = "sandbox.paseo.sh/workspace-id";

@@ -44,7 +44,7 @@ test("pod names are stable and DNS safe", () => {
 test("shared mode mounts the worktree folder and the repo .git at their absolute paths", () => {
   const pod = buildPod(config({ worktree: { claimName: "wt", basePath: "/data/worktrees", subPath: "wts" }, envSecret: "sbx-env" }), "w1", "shared", repo);
   const c = pod.spec.containers[0] as any;
-  assert.equal(pod.metadata.labels["app.kubernetes.io/managed-by"], "paseo-kubernetes-sandbox");
+  assert.equal(pod.metadata.labels["app.kubernetes.io/managed-by"], "paseo-kubernetes-sandboxes");
   assert.equal(pod.metadata.labels["sandbox.paseo.sh/workspace"], workspaceKey("w1"));
   assert.equal(pod.metadata.annotations["sandbox.paseo.sh/workspace-id"], "w1");
   assert.equal(pod.metadata.annotations["sandbox.paseo.sh/mode"], "shared");
@@ -148,7 +148,7 @@ test("ensurePod creates the clone volume first and refuses a mode switch on a li
 test("listPods only selects managed pods and deletePod refuses others", async () => {
   const f = fake((a) => (a[0] === "get" ? JSON.stringify({ items: [JSON.parse(podJson())] }) : undefined));
   const pods = await listPods(f.run);
-  assert.deepEqual(f.calls[0], ["get", "pods", "-l", "app.kubernetes.io/managed-by=paseo-kubernetes-sandbox", "-o", "json"]);
+  assert.deepEqual(f.calls[0], ["get", "pods", "-l", "app.kubernetes.io/managed-by=paseo-kubernetes-sandboxes", "-o", "json"]);
   assert.equal(pods[0].workspaceId, "w1");
   assert.equal(pods[0].ready, true);
   await assert.rejects(deletePod(f.run, "other-pod"), /Not a sandbox pod/);

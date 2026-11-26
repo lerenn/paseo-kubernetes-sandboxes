@@ -24,8 +24,8 @@ commands.
 ```sh
 kubectl create namespace paseo-sandbox
 kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-kubernetes-sandbox -n paseo-sandbox \
-  --role=paseo-kubernetes-sandbox --user=<the identity kubectl uses>
+kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandbox \
+  --role=paseo-kubernetes-sandboxes --user=<the identity kubectl uses>
 
 cd plugin && npm ci
 paseo plugin install "$PWD"
@@ -102,7 +102,7 @@ asking you to delete the pod first (Pods tab). Delete clone pods only after push
 
 ## Pod lifecycle
 
-- Created lazily on the first wrapped launch, labelled `app.kubernetes.io/managed-by=paseo-kubernetes-sandbox`,
+- Created lazily on the first wrapped launch, labelled `app.kubernetes.io/managed-by=paseo-kubernetes-sandboxes`,
   one per workspace id, shared by every conversation, terminal and command of that workspace.
 - Deleted when its workspace is archived (`workspace.archive.after`), when it has run nothing for the idle
   timeout, or from the **Pods** tab. Pods and clone volumes of workspaces that no longer exist are removed

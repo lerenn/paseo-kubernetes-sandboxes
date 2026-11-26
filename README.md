@@ -1,4 +1,4 @@
-# paseo-kubernetes-sandbox
+# paseo-kubernetes-sandboxes
 
 Run a Paseo workspace's agents, terminals and commands in a Kubernetes pod.
 
@@ -51,5 +51,4 @@ make test   # typecheck, unit tests (fake kubectl, no cluster), version check
 
 `plugin/` holds the plugin (`index.server.ts`, `index.client.tsx`, `launcher/kube-exec.sh`). CI runs tests,
 a plugin build check, a manifest check and a version check. Bumping `plugin/package.json` on `main` tags and
-releases that version. The static site in `website/` is previewed with
-`python3 -m http.server 8091 --directory website`.
+releases that version.
