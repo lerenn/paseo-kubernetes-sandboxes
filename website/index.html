@@ -24,7 +24,6 @@
 <h2>Storage modes</h2>
 <p>Each workspace uses one of two modes; a default applies to workspaces that do not choose.</p>
 <ul><li><strong>Shared worktree</strong>: the pod mounts the workspace's worktree (and the repository's <code>.git</code> directory) from a PersistentVolumeClaim, at the same absolute paths as on the daemon. Files are shared with the daemon.</li><li><strong>Pod-local clone</strong>: the pod clones the workspace's <code>origin</code> remote into its own storage (<code>emptyDir</code> or a PVC). Nothing is shared with the daemon's files, and the workspace needs an <code>origin</code> remote.</li></ul>
-<div class="note warn">Storage modes are new and have not been tested against a real daemon and cluster.</div>
 <h2>No operator, no daemon in the pod</h2>
 <p>Paseo 0.17.5 lets a plugin return a launch wrap from hooks. This plugin returns a small launcher that runs the command with <code>kubectl exec</code>. The pod is a plain executor created directly with kubectl.</p>
 <div class="note">Early version. Resource and process isolation, not a security boundary: the pod limits CPU and memory and separates processes, and in shared-worktree mode it shares the worktree volume with the daemon. If the plugin is disabled, work silently runs locally. Not yet tested against a real daemon and cluster.</div>
