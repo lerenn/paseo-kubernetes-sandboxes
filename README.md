@@ -60,3 +60,5 @@ its base branch pass (`.github/workflows/automerge.yaml`; "Allow auto-merge" mus
 checks on the base branch it merges as soon as the PR is mergeable. A merge that bumps `plugin/package.json`
 on `main` is tagged and released by `release.yaml`; if a merge made with the workflow token does not trigger
 it, run Release by hand (`workflow_dispatch`).
+The static site in `website/` is previewed with
+`python3 -m http.server 8091 --directory website`.
