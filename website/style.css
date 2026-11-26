@@ -64,7 +64,7 @@ header.site .brand {
   font-weight: 500;
   color: var(--foreground);
 }
-header.site .brand img { width: 24px; height: 24px; border-radius: var(--radius-md); }
+header.site .brand img { width: 28px; height: 28px; border-radius: var(--radius-lg); }
 header.site nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; font-size: 0.875rem; }
 header.site nav a { color: var(--muted-foreground); }
 header.site nav a:hover, header.site nav a[aria-current="page"] { color: var(--foreground); }
