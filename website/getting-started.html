@@ -12,7 +12,7 @@
 <nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html" aria-current="page">Getting started</a><a href="reference.html">Reference</a><a href="how-it-works.html">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a></nav></div></header>
 <main id="content">
 <h1>Getting started</h1><p class="lead">Apply a Role, install the plugin, then opt workspaces in.</p>
-<h2>Requirements</h2><ul><li>Paseo 0.17.5 or later on the daemon host.</li><li><code>kubectl</code> on the daemon host, authenticated to a cluster.</li><li>A namespace with the Role from <code>config/plugin-rbac.yaml</code> bound to your kubectl identity.</li><li>A PersistentVolumeClaim holding the daemon's worktrees, mountable by the pods.</li><li>An image with a shell and the programs your agents need.</li></ul>
+<h2>Requirements</h2><ul><li>Paseo 0.17.5 or later on the daemon host.</li><li><code>kubectl</code> on the daemon host, authenticated to a cluster.</li><li>A namespace with the Role from <code>config/plugin-rbac.yaml</code> bound to your kubectl identity.</li><li>An image with a shell, git and the programs your agents need.</li><li>Shared worktree mode: a PersistentVolumeClaim holding the worktrees and repositories. Pod-local clone mode: git access from the cluster.</li></ul>
 <h2>Install</h2>
 <pre><code>kubectl create namespace paseo-sandbox
 kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
@@ -21,7 +21,7 @@ kubectl create rolebinding paseo-kubernetes-sandbox -n paseo-sandbox \
 
 cd plugin &amp;&amp; npm ci
 paseo plugin install "$PWD"</code></pre>
-<h2>Set up from Paseo</h2><ol class="steps"><li>Open <strong>Kubernetes Sandbox</strong> from the sidebar.</li><li>In <strong>Settings</strong>, set the image, worktree claim and mount path. Save.</li><li>In <strong>Cluster</strong>, choose context and namespace and run <strong>Check cluster</strong>.</li><li>In <strong>Workspaces</strong>, tick the workspaces that run in a pod. Save.</li><li>Launch an agent or terminal in one of them. The first launch creates the pod.</li></ol>
+<h2>Set up from Paseo</h2><ol class="steps"><li>Open <strong>Kubernetes Sandbox</strong> from the sidebar.</li><li>In <strong>Settings</strong>, set the image and the storage (worktree and repository claims with their base paths, or the clone settings). Save.</li><li>In <strong>Cluster</strong>, choose context and namespace and run <strong>Check cluster</strong>.</li><li>In <strong>Workspaces</strong>, tick the workspaces that run in a pod and pick a storage mode for each. Save.</li><li>Launch an agent or terminal in one of them. The first launch creates the pod.</li></ol>
 <p>Full guide: <a href="https://github.com/lerenn/paseo-kubernetes-sandbox/blob/main/docs/setup.md">docs/setup.md</a>.</p>
 </main>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a>.</div></footer>

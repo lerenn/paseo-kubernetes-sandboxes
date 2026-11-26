@@ -5,17 +5,21 @@ import { podName } from "../shared/sandbox.js";
 import { KubernetesError, type Kubectl } from "./kubectl.js";
 import { wrapFor, type HookDeps } from "./hooks.js";
 import { buildWrap } from "./launch.js";
+import type { RepoInfo } from "./repo.js";
+
+const repoInfo: RepoInfo = { root: "/wt/a", gitDir: null, remoteUrl: "https://example.com/o/r.git", branch: "main" };
 
 const config = (over: Partial<Configuration> = {}): Configuration =>
-  settingsSchema.parse({ image: "img", worktree: { claimName: "wt", mountPath: "/wt" }, workspaces: ["w1"], namespace: "sbx", ...over });
+  settingsSchema.parse({ image: "img", worktree: { claimName: "wt", basePath: "/wt" }, workspaces: [{ id: "w1" }], namespace: "sbx", ...over });
 
 function deps(run: Kubectl, c = config()): HookDeps {
-  return { configuration: async () => c, kubectl: () => run, launcher: "/plugin/launcher/kube-exec.sh", startTimeoutMs: 100 };
+  return { configuration: async () => c, kubectl: () => run, launcher: "/plugin/launcher/kube-exec.sh", startTimeoutMs: 100, repo: async () => repoInfo };
 }
-const ready: Kubectl = async (args) =>
+const readyIn = (mode: string): Kubectl => async (args) =>
   args[0] === "get"
-    ? JSON.stringify({ items: [{ metadata: { name: podName("w1") }, status: { phase: "Running", containerStatuses: [{ name: "main", ready: true }] } }], metadata: { name: podName("w1") }, status: { phase: "Running", containerStatuses: [{ name: "main", ready: true }] } })
+    ? JSON.stringify({ items: [{ metadata: { name: podName("w1") }, status: { phase: "Running", containerStatuses: [{ name: "main", ready: true }] } }], metadata: { name: podName("w1"), annotations: { "sandbox.paseo.sh/mode": mode } }, status: { phase: "Running", containerStatuses: [{ name: "main", ready: true }] } })
     : "";
+const ready = readyIn("shared");
 
 test("buildWrap is an absolute launcher invocation ending with --", () => {
   const w = buildWrap({ context: "kind-x", namespace: "sbx" }, "pod1", { cwd: "/wt/a", envNames: ["A", "B"], launcher: "/l/kube-exec.sh" });
@@ -38,6 +42,17 @@ test("an opted-in workspace gets a wrap with its pod, cwd and env names", async 
   assert.ok(w.join(" ").includes("--cwd /wt/a"));
   assert.ok(w.join(" ").includes("--env FOO"));
   assert.ok(!w.join(" ").includes("secret-value"), "values never enter the wrap");
+});
+
+test("clone mode starts launches in the clone path", async () => {
+  const c = config({ defaultMode: "clone" });
+  const w = await wrapFor(deps(readyIn("clone"), c), { workspaceId: "w1", cwd: "/wt/a/sub", env: {} });
+  assert.ok(w!.join(" ").includes("--cwd /workspace/sub"));
+});
+
+test("a repository that cannot be read fails the launch", async () => {
+  const d = { ...deps(ready), repo: async () => { throw new Error("bad .git"); } };
+  await assert.rejects(wrapFor(d, { workspaceId: "w1", cwd: "/wt", env: {} }), /could not read the workspace repository/);
 });
 
 test("another plugin's wrap is left alone", async () => {

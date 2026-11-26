@@ -2,11 +2,11 @@ import type { PaseoApi } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { execFile } from "node:child_process";
 import { clusterCheck, podsDelete, podsList, podsLogs, workspacesList } from "./shared/contracts.js";
-import { sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
+import { modeOf, optedIn, sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
 import { podName } from "./shared/sandbox.js";
 import { connection, kubectlBinary } from "./server/kubectl.js";
 import { checkCluster } from "./server/cluster.js";
-import { deletePod, listPodsWithUsage, podLogs, sweep } from "./server/pods.js";
+import { deleteClonePvc, deletePod, listPodsWithUsage, podLogs, sweep } from "./server/pods.js";
 import { wrapFor, type HookDeps } from "./server/hooks.js";
 
 const SWEEP_MS = 60_000;
@@ -90,7 +90,8 @@ export default function contribute(server: PluginServerContext) {
         id: w.id,
         name: w.name,
         directory: w.workspaceDirectory ?? w.projectRootPath,
-        optedIn: c.workspaces.includes(w.id),
+        optedIn: optedIn(c, w.id),
+        mode: modeOf(c, w.id),
         pod: podName(w.id),
       })),
     };
@@ -120,8 +121,11 @@ export default function contribute(server: PluginServerContext) {
     }),
     server.addHook("workspace.archive.after", async ({ workspace }) => {
       const c = await configuration();
-      if (!c.workspaces.includes(workspace.id)) return;
-      await connection(c)(["delete", "pod", podName(workspace.id), "--wait=false", "--ignore-not-found"]).catch(() => {
+      if (!optedIn(c, workspace.id)) return;
+      const run = connection(c);
+      await run(["delete", "pod", podName(workspace.id), "--wait=false", "--ignore-not-found"])
+        .then(() => deleteClonePvc(run, workspace.id))
+        .catch(() => {
         console.error("Kubernetes Sandbox could not delete the pod of an archived workspace; it will be swept later.");
       });
     }),
