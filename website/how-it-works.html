@@ -9,7 +9,7 @@
 </head><body>
 <a class="skip" href="#content">Skip to content</a>
 <header class="site"><div class="inner"><a class="brand" href="index.html"><img src="assets/logo.png" width="24" height="24" alt="">Kubernetes Sandbox</a>
-<nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html">Reference</a><a href="how-it-works.html" aria-current="page">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a></nav></div></header>
+<nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html">Reference</a><a href="how-it-works.html" aria-current="page">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a></nav></div></header>
 <main id="content">
 <h1>How it works</h1>
 <h2>Launch wraps</h2><p>Before an agent, terminal or <code>paseo.json</code> setup/teardown command starts, Paseo asks plugin hooks for a wrap. For an opted-in workspace the plugin makes sure the pod exists and returns <code>[kube-exec.sh, options, "--"]</code>. Paseo runs the wrap followed by the original command; the launcher runs it in the pod and passes stdin, stdout and the exit code through.</p>
@@ -17,5 +17,5 @@
 <h2>Stopping</h2><p>On TERM, INT or HUP the launcher kills the remote process with a second <code>kubectl exec</code>. SIGKILL cannot be trapped: the remote process then lives until the pod is deleted.</p>
 <h2>Limits</h2><ul><li>Disabling the plugin makes opted-in workspaces run locally again, silently.</li><li>A wrapped shell has no Paseo shell integration, so <code>paseo.json</code> scripts do not report completion.</li><li>Resource and process isolation, not a security boundary. In shared-worktree mode the pod shares the worktree volume with the daemon.</li><li>Pod-local clone mode needs an <code>origin</code> remote, and changes stay in the pod until pushed (an <code>emptyDir</code> clone is lost when the pod is deleted).</li><li>Teardown commands use an existing pod and otherwise run locally; the archive/teardown order is unconfirmed.</li><li>Not tested: specific agents, port forwarding, file views, long idle connections.</li></ul>
 </main>
-<footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a>.</div></footer>
+<footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>
 </body></html>
