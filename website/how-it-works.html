@@ -4,18 +4,33 @@
 <title>How it works · Paseo Kubernetes Sandbox</title>
 <meta name="description" content="Launch wraps, pod lifecycle and limits.">
 <meta name="theme-color" content="#101615">
-<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="icon" href="assets/favicon.png" type="image/png"><link rel="apple-touch-icon" href="assets/favicon.png">
 <link rel="stylesheet" href="style.css">
 </head><body>
 <a class="skip" href="#content">Skip to content</a>
-<header class="site"><div class="inner"><a class="brand" href="index.html"><img src="assets/logo.png" width="24" height="24" alt="">Kubernetes Sandbox</a>
-<nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html">Reference</a><a href="how-it-works.html" aria-current="page">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a></nav></div></header>
+<header class="site"><div class="inner"><a class="brand" href="index.html"><img src="assets/favicon.png" width="28" height="28" alt="">Kubernetes Sandbox</a>
+<nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html">Reference</a><a href="how-it-works.html" aria-current="page">How it works</a><a class="gh" href="https://github.com/lerenn/paseo-kubernetes-sandboxes" aria-label="GitHub repository" title="GitHub repository"><svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></nav></div></header>
+<div class="doc">
+<aside class="sidebar"><details class="toc-mobile" open><summary>On this page</summary><nav aria-label="On this page">
+<a href="#launch-wraps">Launch wraps</a>
+<a href="#pod-lifecycle">Pod lifecycle</a>
+<a href="#stopping">Stopping</a>
+<a href="#limits">Limits</a>
+</nav></details></aside>
 <main id="content">
 <h1>How it works</h1>
-<h2>Launch wraps</h2><p>Before an agent, terminal or <code>paseo.json</code> setup/teardown command starts, Paseo asks plugin hooks for a wrap. For an opted-in workspace the plugin makes sure the pod exists and returns <code>[kube-exec.sh, options, "--"]</code>. Paseo runs the wrap followed by the original command; the launcher runs it in the pod and passes stdin, stdout and the exit code through.</p>
-<h2>Pod lifecycle</h2><p>Pods are created on first use and deleted on workspace archive, idle timeout, or from the Pods tab. A sweep every minute removes idle pods; the first sweep after start also removes pods whose workspace no longer exists.</p>
-<h2>Stopping</h2><p>On TERM, INT or HUP the launcher kills the remote process with a second <code>kubectl exec</code>. SIGKILL cannot be trapped: the remote process then lives until the pod is deleted.</p>
-<h2>Limits</h2><ul><li>Disabling the plugin makes opted-in workspaces run locally again, silently.</li><li>A wrapped shell has no Paseo shell integration, so <code>paseo.json</code> scripts do not report completion.</li><li>Resource and process isolation, not a security boundary. In shared-worktree mode the pod shares the worktree volume with the daemon.</li><li>Pod-local clone mode needs an <code>origin</code> remote, and changes stay in the pod until pushed (an <code>emptyDir</code> clone is lost when the pod is deleted).</li><li>Teardown commands use an existing pod and otherwise run locally; the archive/teardown order is unconfirmed.</li><li>Not tested: specific agents, port forwarding, file views, long idle connections.</li></ul>
+<h2 id="launch-wraps">Launch wraps</h2><p>Before an agent, terminal or <code>paseo.json</code> setup/teardown command starts, Paseo asks plugin hooks for a wrap. For an opted-in workspace the plugin makes sure the pod exists and returns <code>[kube-exec.sh, options, "--"]</code>. Paseo runs the wrap followed by the original command; the launcher runs it in the pod and passes stdin, stdout and the exit code through.</p>
+<h2 id="pod-lifecycle">Pod lifecycle</h2><p>Pods are created on first use and deleted on workspace archive, idle timeout, or from the Pods tab. A sweep every minute removes idle pods; the first sweep after start also removes pods whose workspace no longer exists.</p>
+<h2 id="stopping">Stopping</h2><p>On TERM, INT or HUP the launcher kills the remote process with a second <code>kubectl exec</code>. SIGKILL cannot be trapped: the remote process then lives until the pod is deleted.</p>
+<h2 id="limits">Limits</h2><ul><li>Disabling the plugin makes opted-in workspaces run locally again, silently.</li><li>A wrapped shell has no Paseo shell integration, so <code>paseo.json</code> scripts do not report completion.</li><li>Resource and process isolation, not a security boundary. In shared-worktree mode the pod shares the worktree volume with the daemon.</li><li>Pod-local clone mode needs an <code>origin</code> remote, and changes stay in the pod until pushed (an <code>emptyDir</code> clone is lost when the pod is deleted).</li><li>Teardown commands use an existing pod and otherwise run locally; the archive/teardown order is unconfirmed.</li><li>Not tested: specific agents, port forwarding, file views, long idle connections.</li></ul>
 </main>
+</div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>
+<script>
+(function(){var d=document.querySelector('.toc-mobile'),q=matchMedia('(max-width: 52rem)');function f(){d.open=!q.matches}f();q.addEventListener('change',f);
+var l=[].slice.call(document.querySelectorAll('.sidebar nav a')),m={};l.forEach(function(a){m[a.hash.slice(1)]=a});
+if(!('IntersectionObserver' in window))return;
+var o=new IntersectionObserver(function(e){e.forEach(function(x){if(x.isIntersecting){l.forEach(function(a){a.classList.remove('active');a.removeAttribute('aria-current')});var a=m[x.target.id];a.classList.add('active');a.setAttribute('aria-current','location');var g=a.closest('details.grp');if(g)g.open=true;if(!q.matches)a.scrollIntoView({block:'nearest'})}})},{rootMargin:'-70px 0px -75% 0px'});
+document.querySelectorAll('main h2[id],main h3[id]').forEach(function(h){o.observe(h)})})();
+</script>
 </body></html>
