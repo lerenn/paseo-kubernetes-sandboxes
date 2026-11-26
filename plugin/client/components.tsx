@@ -77,6 +77,7 @@ export function Field({
   onChange,
   placeholder,
   hint,
+  error,
   disabled = false,
   secret = false,
 }: {
@@ -86,6 +87,8 @@ export function Field({
   onChange(value: string): void;
   placeholder?: string;
   hint?: string;
+  /** A problem with the value: replaces the hint, in the danger colour. */
+  error?: string;
   disabled?: boolean;
   secret?: boolean;
 }) {
@@ -118,7 +121,7 @@ export function Field({
           color: theme.colors.foreground,
           backgroundColor: theme.colors.surface0,
           borderWidth: 1,
-          borderColor: focus ? theme.colors.accent : theme.colors.border,
+          borderColor: error ? theme.colors.statusDanger : focus ? theme.colors.accent : theme.colors.border,
           borderRadius: 8,
           paddingHorizontal: 12,
           paddingVertical: 11,
@@ -126,15 +129,16 @@ export function Field({
           opacity: disabled ? 0.6 : 1,
         }}
       />
-      {hint && (
+      {(error || hint) && (
         <Text
+          accessibilityRole={error ? "alert" : undefined}
           style={{
             fontSize: 14,
             lineHeight: 20,
-            color: theme.colors.foregroundMuted,
+            color: error ? theme.colors.statusDanger : theme.colors.foregroundMuted,
           }}
         >
-          {hint}
+          {error ?? hint}
         </Text>
       )}
     </View>
