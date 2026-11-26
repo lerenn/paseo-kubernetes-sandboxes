@@ -26,6 +26,23 @@ jobs:
       - name: Launcher is executable and valid sh
         working-directory: plugin
         run: test -x launcher/kube-exec.sh && sh -n launcher/kube-exec.sh
+  plugin-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install the plugin's dependencies (as the manifest build step does)
+        working-directory: plugin
+        run: npm ci --ignore-scripts
+      - name: Install Paseo's compiler, same version the plugin targets
+        run: |
+          v=$(node -p 'require("./plugin/package.json").devDependencies["@getpaseo/plugin"]')
+          mkdir "$RUNNER_TEMP/paseo" && cd "$RUNNER_TEMP/paseo" && npm init -y >/dev/null
+          npm i --no-save --no-audit --no-fund "@getpaseo/server@$v"
+          echo "PASEO_VERSION=$v" >> "$GITHUB_ENV"
+      - name: Build the plugin with the real Paseo compiler (client and server bundles)
+        run: node .github/scripts/build-plugin.mjs "$RUNNER_TEMP/paseo/node_modules" plugin "$PASEO_VERSION"
   rbac:
     runs-on: ubuntu-latest
     steps:
