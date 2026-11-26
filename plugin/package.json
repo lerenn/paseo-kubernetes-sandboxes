@@ -1,0 +1,21 @@
+{
+  "name": "paseo-kubernetes-sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test server/*.test.ts shared/*.test.ts client/*.test.ts launcher/*.test.ts"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.17.5",
+    "@getpaseo/plugin": "0.17.5",
+    "@types/node": "^22.0.0",
+    "@types/react": "19.1.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "zod": "^4.0.0"
+  }
+}

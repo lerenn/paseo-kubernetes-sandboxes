@@ -1,0 +1,36 @@
+name: Release
+# Merging a version bump to main releases it: if vX.Y.Z (plugin/package.json) has no tag yet, create
+# the tag and the GitHub release. Idempotent: an already tagged version is a no-op. Re-run a failed
+# release with workflow_dispatch on main. There are no images or charts to publish.
+on:
+  push:
+    branches: [main]
+    paths: [plugin/package.json]
+  workflow_dispatch:
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(node -p 'require("./plugin/package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "v$version is already tagged: nothing to release"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - run: node .github/scripts/check-version.mjs
+        if: steps.v.outputs.new == 'true'
+      - name: Create the vX.Y.Z tag and GitHub release
+        if: steps.v.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.v.outputs.version }}" --target "$GITHUB_SHA" --title "v${{ steps.v.outputs.version }}" --generate-notes

@@ -1,0 +1,43 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: plugin/package-lock.json}
+      - run: npm ci && npm run typecheck && npm test
+        working-directory: plugin
+  plugin-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Run the manifest build step, as Paseo does on install
+        working-directory: plugin
+        run: |
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync("paseo-plugin.json", "utf8"));
+            for (const f of [m.icon, "index.server.ts", "index.client.tsx"]) require("fs").accessSync(f);
+            for (const cmd of m.build) require("child_process").execFileSync(cmd[0], cmd.slice(1), { stdio: "inherit" });
+          '
+      - name: Launcher is executable and valid sh
+        working-directory: plugin
+        run: test -x launcher/kube-exec.sh && sh -n launcher/kube-exec.sh
+  rbac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the Kubernetes manifests
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          ./kubeconform -strict -summary config
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Versions aligned (package.json, lock); a bump must exceed the latest tag
+        run: node .github/scripts/check-version.mjs "${{ github.event.pull_request.base.sha || 'HEAD' }}"
