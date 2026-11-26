@@ -1,4 +1,4 @@
-# paseo-kubernetes-sandbox
+# paseo-kubernetes-sandboxes
 
 Run a Paseo workspace's agents, terminals and commands in a Kubernetes pod.
 
