@@ -52,3 +52,11 @@ make test   # typecheck, unit tests (fake kubectl, no cluster), version check
 `plugin/` holds the plugin (`index.server.ts`, `index.client.tsx`, `launcher/kube-exec.sh`). CI runs tests,
 a plugin build check, a manifest check and a version check. Bumping `plugin/package.json` on `main` tags and
 releases that version.
+
+## Auto-merge
+
+Add the `automerge` label to one of the owner's PRs and GitHub squash-merges it once the required checks on
+its base branch pass (`.github/workflows/automerge.yaml`; "Allow auto-merge" must be on). Without required
+checks on the base branch it merges as soon as the PR is mergeable. A merge that bumps `plugin/package.json`
+on `main` is tagged and released by `release.yaml`; if a merge made with the workflow token does not trigger
+it, run Release by hand (`workflow_dispatch`).
