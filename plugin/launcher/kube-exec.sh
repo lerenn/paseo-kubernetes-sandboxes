@@ -2,7 +2,7 @@
 # Launch wrapper: runs "<command> [args...]" inside a sandbox pod through `kubectl exec`.
 # Paseo starts it as `kube-exec.sh <options> -- <command> [args...]`.
 #
-#   --namespace NS   --pod POD   [--context CTX]   [--container NAME]   [--cwd DIR]
+#   --namespace NS   --pod POD   [--kubeconfig FILE]   [--context CTX]   [--container NAME]   [--cwd DIR]
 #   [--env NAME]...  names of local environment variables to forward into the pod
 #   [--state-dir D]  per-pod directory for pid files (default /tmp/sbx)
 #
@@ -16,6 +16,7 @@
 set -u
 
 kubectl_bin=${PASEO_SANDBOX_KUBECTL:-kubectl}
+kubeconfig=
 ctx=
 ns=
 pod=
@@ -28,6 +29,7 @@ die() { echo "kube-exec: $*" >&2; exit 64; }
 
 while [ $# -gt 0 ]; do
   case $1 in
+    --kubeconfig) [ $# -ge 2 ] || die "$1 needs a value"; kubeconfig=$2; shift 2 ;;
     --context) [ $# -ge 2 ] || die "$1 needs a value"; ctx=$2; shift 2 ;;
     --namespace) [ $# -ge 2 ] || die "$1 needs a value"; ns=$2; shift 2 ;;
     --pod) [ $# -ge 2 ] || die "$1 needs a value"; pod=$2; shift 2 ;;
@@ -68,7 +70,10 @@ tty_flags=-i
 
 # Shared kubectl prefix as a function: positional parameters hold the command.
 kc() {
-  if [ -n "$ctx" ]; then "$kubectl_bin" --context "$ctx" "$@"; else "$kubectl_bin" "$@"; fi
+  if [ -n "$kubeconfig" ] && [ -n "$ctx" ]; then "$kubectl_bin" --kubeconfig "$kubeconfig" --context "$ctx" "$@"
+  elif [ -n "$kubeconfig" ]; then "$kubectl_bin" --kubeconfig "$kubeconfig" "$@"
+  elif [ -n "$ctx" ]; then "$kubectl_bin" --context "$ctx" "$@"
+  else "$kubectl_bin" "$@"; fi
 }
 
 # A background job gets /dev/null as stdin in some shells (dash) unless stdin is re-opened from

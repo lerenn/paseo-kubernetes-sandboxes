@@ -1,10 +1,10 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { execFile } from "node:child_process";
-import { clusterCheck, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "./shared/contracts.js";
+import { clusterCheck, clusterContexts, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "./shared/contracts.js";
 import { modeOf, optedIn, sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
 import { podName } from "./shared/sandbox.js";
-import { connection, kubectlBinary } from "./server/kubectl.js";
+import { connection, kubectlBinary, listContexts } from "./server/kubectl.js";
 import { checkCluster } from "./server/cluster.js";
 import { deleteClonePvc, deletePod, listPodsWithUsage, podLogs, sweep } from "./server/pods.js";
 import { removeSsh, sshStatus as readSshStatus, syncSsh } from "./server/ssh.js";
@@ -68,6 +68,10 @@ export default function contribute(server: PluginServerContext) {
     attach(paseo);
     const c = await configuration();
     return checkCluster(c, connection(c), clientVersion);
+  });
+  server.handle(clusterContexts, async (_, { paseo }) => {
+    attach(paseo);
+    return { contexts: await listContexts(await configuration()) };
   });
   server.handle(podsList, async (_, { paseo }) => {
     attach(paseo);

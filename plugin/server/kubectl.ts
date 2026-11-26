@@ -19,12 +19,16 @@ export class KubernetesError extends Error {
 export type Kubectl = (args: string[], input?: unknown) => Promise<string>;
 export const kubectlBinary = () => process.env.PASEO_SANDBOX_KUBECTL || "kubectl";
 
-export function connection(c: Pick<Configuration, "context" | "namespace">, bin = kubectlBinary()): Kubectl {
+// `--kubeconfig` (not the KUBECONFIG variable): it is explicit, takes precedence over any KUBECONFIG in the daemon's
+// environment, and cannot be turned into a colon-separated list by a path containing ":". No shell is involved.
+export const kubeconfigArgs = (c: { kubeconfigFile?: string }) => (c.kubeconfigFile ? ["--kubeconfig", c.kubeconfigFile] : []);
+
+export function connection(c: Pick<Configuration, "context" | "namespace"> & { kubeconfigFile?: string }, bin = kubectlBinary()): Kubectl {
   return (args, input) =>
     new Promise((resolve, reject) => {
       const child = execFile(
         bin,
-        [...(c.context ? ["--context", c.context] : []), "--namespace", c.namespace, "--request-timeout=20s", ...args],
+        [...kubeconfigArgs(c), ...(c.context ? ["--context", c.context] : []), "--namespace", c.namespace, "--request-timeout=20s", ...args],
         { timeout: 150_000, maxBuffer: 4 * 1024 * 1024 },
         (error, stdout, stderr) => {
           // Never return kubectl stderr: it can echo manifests and Secret payloads.
@@ -45,4 +49,13 @@ export function connection(c: Pick<Configuration, "context" | "namespace">, bin 
       child.stdin?.on("error", () => {});
       child.stdin?.end(input === undefined ? undefined : JSON.stringify(input));
     });
+}
+
+// Contexts of the configured kubeconfig (names only, read-only). Empty when kubectl cannot read it.
+export function listContexts(c: { kubeconfigFile?: string }, bin = kubectlBinary()): Promise<string[]> {
+  return new Promise((resolve) =>
+    execFile(bin, [...kubeconfigArgs(c), "config", "get-contexts", "-o", "name"], { timeout: 10_000, maxBuffer: 1024 * 1024 }, (error, stdout) =>
+      resolve(error ? [] : stdout.split("\n").map((l) => l.trim()).filter(Boolean)),
+    ),
+  );
 }

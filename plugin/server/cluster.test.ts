@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { settingsSchema } from "../shared/settings.js";
-import { KubernetesError, connection, type Kubectl } from "./kubectl.js";
+import { KubernetesError, connection, listContexts, type Kubectl } from "./kubectl.js";
 import { checkCluster } from "./cluster.js";
 
 const c = settingsSchema.parse({ image: "i", worktree: { claimName: "wt", basePath: "/wt" } });
@@ -70,4 +70,47 @@ test("Secret rights are reported apart from pod rights, only with Git over SSH",
   assert.equal(pods.checks.find((x) => x.id === "rbac")!.status, "fail");
   assert.equal(pods.checks.find((x) => x.id === "secrets")!.status, "ok");
   assert.ok(!(await checkCluster(c, deny("x"), version)).checks.some((x) => x.id === "secrets"));
+});
+
+// Fake kubectl that logs its arguments (never any content) and prints two context names.
+function fakeKubectl() {
+  const dir = mkdtempSync(join(tmpdir(), "kc-args-"));
+  const log = join(dir, "args.log");
+  const bin = join(dir, "kubectl");
+  writeFileSync(bin, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >>"${log}"\necho ctx-a\necho ctx-b\n`);
+  chmodSync(bin, 0o755);
+  return { bin, log };
+}
+
+test("connection passes --kubeconfig as one argument, spaces included, only when set", async () => {
+  const f = fakeKubectl();
+  const path = "/tmp/my dir/kube config";
+  await connection({ context: "x", namespace: "n", kubeconfigFile: path }, f.bin)(["get", "pods"]);
+  assert.deepEqual(readFileSync(f.log, "utf8").split("\n").slice(0, 5), ["--kubeconfig", path, "--context", "x", "--namespace"]);
+  const g = fakeKubectl();
+  await connection({ context: "", namespace: "n", kubeconfigFile: "" }, g.bin)(["get", "pods"]);
+  assert.ok(!readFileSync(g.log, "utf8").includes("--kubeconfig"));
+});
+
+test("listContexts asks kubectl for names only, with the kubeconfig", async () => {
+  const f = fakeKubectl();
+  assert.deepEqual(await listContexts({ kubeconfigFile: "/k c" }, f.bin), ["ctx-a", "ctx-b"]);
+  assert.equal(readFileSync(f.log, "utf8").trim(), "--kubeconfig\n/k c\nconfig\nget-contexts\n-o\nname");
+  assert.deepEqual(await listContexts({}, "/nonexistent/kubectl"), []);
+});
+
+test("Check cluster reports the kubeconfig path, and fails clearly when the file is unusable", async () => {
+  const withFile = settingsSchema.parse({ image: "i", worktree: { claimName: "wt", basePath: "/wt" }, kubeconfigFile: "/etc/kc/config" });
+  const run: Kubectl = async (a) => (a[0] === "auth" ? "yes\n" : a[0] === "config" ? "ctx\n" : "x");
+  const ok = await checkCluster(withFile, run, version, async () => null);
+  assert.equal(ok.kubeconfigFile, "/etc/kc/config");
+  assert.deepEqual(ok.checks.slice(0, 3).map((x) => [x.id, x.status]), [["kubectl", "ok"], ["kubeconfig", "ok"], ["cluster", "ok"]]);
+  assert.match(ok.checks.find((x) => x.id === "cluster")!.detail, /kubeconfig \/etc\/kc\/config/);
+  let asked = 0;
+  const bad = await checkCluster(withFile, async () => (asked++, "x"), version);
+  assert.deepEqual(bad.checks.map((x) => [x.id, x.status]), [["kubectl", "ok"], ["kubeconfig", "fail"]]);
+  assert.match(bad.checks[1].detail, /\/etc\/kc\/config does not exist or is not readable/);
+  assert.equal(asked, 0, "no kubectl call with an unusable file");
+  assert.equal((await checkCluster(c, run, version)).kubeconfigFile, "");
+  assert.ok(!(await checkCluster(c, run, version)).checks.some((x) => x.id === "kubeconfig"));
 });
