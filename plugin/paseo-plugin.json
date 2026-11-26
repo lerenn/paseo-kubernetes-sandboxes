@@ -1,0 +1,10 @@
+{
+  "id": "kubernetes-sandbox",
+  "name": "Kubernetes Sandbox",
+  "description": "Run a Paseo workspace's agents, terminals and commands in a Kubernetes pod.",
+  "requirements": {
+    "paseo": ">=0.17.5"
+  },
+  "icon": "assets/icon.png",
+  "build": [["npm", "ci", "--ignore-scripts"]]
+}

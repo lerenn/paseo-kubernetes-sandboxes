@@ -1,0 +1,25 @@
+# Bind this Role to the identity kubectl uses on the Paseo daemon host (user or ServiceAccount).
+# Apply it in the sandbox namespace, for example:
+#   kubectl create namespace paseo-sandbox
+#   kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
+#   kubectl create rolebinding paseo-kubernetes-sandbox -n paseo-sandbox \
+#     --role=paseo-kubernetes-sandbox --user=<your-user>
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: paseo-kubernetes-sandbox
+  namespace: paseo-sandbox
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: ['']
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: ['']
+    resources: [pods/log]
+    verbs: [get]
+  # Cluster tab: check that the worktree volume claim exists.
+  - apiGroups: ['']
+    resources: [persistentvolumeclaims]
+    verbs: [get]

@@ -1,0 +1,12 @@
+# EXAMPLE of a worktree volume claim. The daemon and the sandbox pods must reach the same files:
+# use a ReadWriteMany class (NFS, CephFS, ...) or keep everything on one node. Adjust to your cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paseo-worktrees
+  namespace: paseo-sandbox
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 20Gi
