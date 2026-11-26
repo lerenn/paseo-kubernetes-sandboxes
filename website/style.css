@@ -64,7 +64,7 @@ header.site .brand {
   font-weight: 500;
   color: var(--foreground);
 }
-header.site .brand img { width: 24px; height: 24px; border-radius: var(--radius-md); }
+header.site .brand img { width: 28px; height: 28px; border-radius: var(--radius-lg); }
 header.site nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; font-size: 0.875rem; }
 header.site nav a { color: var(--muted-foreground); }
 header.site nav a:hover, header.site nav a[aria-current="page"] { color: var(--foreground); }
@@ -186,3 +186,34 @@ a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outli
 pre code { font-size: .875rem; }
 footer.site a { white-space: nowrap; }
 @media(max-width: 40rem) { .pods { grid-template-columns: 1fr; } .architecture { padding: 1rem; } .brand { font-size: .95rem; } }
+
+/* Left "On this page" sidebar (Reference, How it works) */
+.doc { display: flex; align-items: flex-start; max-width: 76rem; margin: 0 auto; }
+.doc main { flex: 1; min-width: 0; margin: 0; max-width: 50rem; }
+.sidebar {
+  position: sticky; top: 3.6rem; flex: 0 0 15.5rem; align-self: flex-start;
+  max-height: calc(100vh - 3.6rem); overflow-y: auto;
+  padding: 2rem 1rem 2rem 1.25rem; border-right: 1px solid var(--border); font-size: 0.86rem;
+}
+.sidebar details.toc-mobile { border: 0; background: none; margin: 0; }
+.sidebar details.toc-mobile > summary { display: none; }
+.sidebar a { display: block; padding: 0.22rem 0.6rem; border-radius: var(--radius-md); color: var(--muted-foreground); line-height: 1.4; }
+.sidebar nav > a { margin-top: 0.35rem; color: var(--foreground); }
+.sidebar ul { list-style: none; margin: 0 0 0.3rem; padding: 0 0 0 0.6rem; }
+.sidebar li { margin: 0; }
+.sidebar a:hover { background: var(--muted); color: var(--foreground); }
+.sidebar a.active { background: var(--secondary); color: var(--accent); }
+.sidebar a:focus-visible, .sidebar summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.doc h2, .doc h3 { scroll-margin-top: 4.5rem; }
+.sidebar details.grp { border: 0; background: none; margin: 0; }
+.sidebar details.grp > summary { display: flex; align-items: center; padding: 0; margin-top: 0.35rem; list-style: none; cursor: pointer; }
+.sidebar details.grp > summary::-webkit-details-marker { display: none; }
+.sidebar details.grp > summary::after { content: "▸"; margin-left: auto; padding: 0 0.6rem; font-size: 0.75rem; color: var(--muted-foreground); }
+.sidebar details.grp[open] > summary::after { content: "▾"; }
+.sidebar details.grp > summary a { flex: 1; color: var(--foreground); margin-top: 0; }
+@media (max-width: 52rem) {
+  .doc { display: block; }
+  .sidebar { position: static; max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); padding: 0.75rem 1.25rem; }
+  .sidebar details.toc-mobile > summary { display: block; cursor: pointer; padding: 0.4rem 0; color: var(--foreground); font-weight: 500; }
+  .doc main { max-width: none; }
+}

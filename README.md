@@ -1,4 +1,4 @@
-# paseo-kubernetes-sandboxes
+# paseo-sandboxes
 
 Run a Paseo workspace's agents, terminals and commands in a Kubernetes pod.
 
@@ -10,7 +10,7 @@ stays on the main daemon; there is no daemon, gateway or operator in the pod. On
 ## Requirements
 
 - Paseo 0.17.5 or later; `kubectl` on the daemon host; a Kubernetes cluster.
-- The Role in `config/plugin-rbac.yaml`, applied in the sandbox namespace.
+- A namespace where your kubectl identity can manage pods, pods/exec, pods/log and claims (see [Cluster rights](#cluster-rights-only-if-your-identity-lacks-them)).
 - An image with a shell, git and the programs your agents need.
 - For the shared worktree mode: a PersistentVolumeClaim holding the worktrees and repositories.
   For the pod-local clone mode: git access from the cluster (a Secret for private repositories).
@@ -29,12 +29,23 @@ stays on the main daemon; there is no daemon, gateway or operator in the pod. On
 ## Install and use
 
 ```sh
-kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
 cd plugin && npm ci && paseo plugin install "$PWD"
 ```
 
 Open **Kubernetes Sandbox** from the sidebar: set the image and storage in **Settings**, run **Check
 cluster**, then opt workspaces in and pick their mode on the **Workspaces** tab. Full guide: [docs/setup.md](docs/setup.md).
+
+### Cluster rights (only if your identity lacks them)
+
+Needed only when **Check cluster** reports missing rights (not needed with cluster-admin, or when a GitOps
+repository already applies the Role). The plugin cannot grant itself rights; a cluster admin runs:
+
+```sh
+kubectl create namespace paseo-sandboxes
+kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
+kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
+  --role=paseo-sandboxes --user=<the identity kubectl uses>
+```
 
 ## Limits
 

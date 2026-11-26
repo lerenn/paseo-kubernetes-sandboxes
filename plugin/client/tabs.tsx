@@ -161,7 +161,7 @@ export function ClusterTab(p: Common & { draft: Configuration; patch<K extends k
         <View style={{ padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface0 }}>
           <Text selectable style={{ ...text, ...mono }}>
             kubectl apply -n {draft.namespace} -f config/plugin-rbac.yaml{"\n"}
-            kubectl create rolebinding paseo-kubernetes-sandboxes -n {draft.namespace} --role=paseo-kubernetes-sandboxes --user=YOU
+            kubectl create rolebinding paseo-sandboxes -n {draft.namespace} --role=paseo-sandboxes --user=YOU
           </Text>
         </View>
         <ExternalLink href={DOCS}>Full setup guide</ExternalLink>

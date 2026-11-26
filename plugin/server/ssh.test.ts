@@ -60,7 +60,7 @@ test("settings: paths must be absolute, a key needs known_hosts, nothing is read
 test("the Secret manifest: labels, hash annotation, data, no plain key", () => {
   const s = buildSshSecret(FAKE_KEY, FAKE_HOSTS, new Date("2026-01-02T03:04:05Z"));
   assert.equal(s.metadata.name, "paseo-sandbox-ssh");
-  assert.equal(s.metadata.labels["app.kubernetes.io/managed-by"], "paseo-kubernetes-sandboxes");
+  assert.equal(s.metadata.labels["app.kubernetes.io/managed-by"], "paseo-sandboxes");
   assert.equal(s.metadata.annotations["sandbox.paseo.sh/content-sha256"], contentHash(FAKE_KEY, FAKE_HOSTS));
   assert.equal(s.metadata.annotations["sandbox.paseo.sh/synced-at"], "2026-01-02T03:04:05.000Z");
   assert.equal(Buffer.from(s.data["ssh-privatekey"], "base64").toString(), FAKE_KEY.toString());
