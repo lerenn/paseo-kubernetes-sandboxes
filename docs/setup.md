@@ -24,8 +24,8 @@ commands.
 ```sh
 kubectl create namespace paseo-sandboxes
 kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandboxes \
-  --role=paseo-kubernetes-sandboxes --user=<the identity kubectl uses>
+kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
+  --role=paseo-sandboxes --user=<the identity kubectl uses>
 
 cd plugin && npm ci
 paseo plugin install "$PWD"

@@ -16,8 +16,8 @@
 <h2>Install</h2>
 <pre><code>kubectl create namespace paseo-sandboxes
 kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandboxes \
-  --role=paseo-kubernetes-sandboxes --user=&lt;identity&gt;
+kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
+  --role=paseo-sandboxes --user=&lt;identity&gt;
 
 cd plugin &amp;&amp; npm ci
 paseo plugin install "$PWD"</code></pre>
