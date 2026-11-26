@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference · Paseo Kubernetes Sandbox</title>
+<meta name="description" content="Settings, hooks, pod spec and launcher options.">
+<meta name="theme-color" content="#101615">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head><body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="site"><div class="inner"><a class="brand" href="index.html"><img src="assets/logo.png" width="24" height="24" alt="">Kubernetes Sandbox</a>
+<nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html" aria-current="page">Reference</a><a href="how-it-works.html">How it works</a><a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a></nav></div></header>
+<main id="content">
+<h1>Reference</h1>
+<h2>Settings</h2><ul><li><strong>Image</strong>: needs a shell and your tools. Required.</li><li><strong>CPU / memory</strong>: requests and limits of the main container.</li><li><strong>Worktree volume</strong>: claim, mount path (same path in the pod), optional sub path. Required.</li><li><strong>Idle timeout</strong>: minutes before an idle pod is deleted; 0 disables it.</li><li><strong>Environment Secret</strong>: optional Secret exposed as environment variables.</li><li><strong>Docker-in-Docker</strong>: optional privileged sidecar, off by default.</li><li><strong>Context, namespace</strong>: where pods are created.</li></ul>
+<h2>Hooks</h2><ul><li><code>agent.open.before</code>, <code>terminal.create.before</code>, <code>command.run.before</code>: return <code>wrap</code> for opted-in workspaces.</li><li><code>workspace.archive.after</code>: deletes the workspace's pod.</li></ul>
+<h2>Pod</h2><p>Named <code>sbx-&lt;hash of workspace id&gt;</code>, labelled <code>app.kubernetes.io/managed-by=paseo-kubernetes-sandbox</code>, with a shared process namespace and no service account token. The main container idles; work arrives through <code>kubectl exec</code>.</p>
+<h2>Launcher</h2><pre><code>kube-exec.sh --namespace NS --pod POD [--context C] [--container main]
+  [--cwd DIR] [--env NAME]... [--state-dir /tmp/sbx] -- command [args...]</code></pre>
+<p>Forwarded variable values travel as <code>kubectl exec</code> arguments. Use the environment Secret for credentials.</p>
+<h2>RBAC</h2><p>pods: get, list, watch, create, delete; pods/exec: create; pods/log: get; persistentvolumeclaims: get.</p>
+</main>
+<footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandbox">GitHub</a>.</div></footer>
+</body></html>
