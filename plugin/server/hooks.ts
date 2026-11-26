@@ -1,6 +1,7 @@
-import type { Configuration } from "../shared/settings.js";
+import { modeOf, optedIn, type Configuration } from "../shared/settings.js";
 import { podName } from "../shared/sandbox.js";
-import { ensurePod, listPods } from "./pods.js";
+import { ensurePod, listPods, podCwd } from "./pods.js";
+import { resolveRepo, type RepoInfo } from "./repo.js";
 import type { Kubectl } from "./kubectl.js";
 import { buildWrap, forwardableEnv, type Wrap } from "./launch.js";
 
@@ -8,6 +9,7 @@ export type HookDeps = {
   configuration(): Promise<Configuration>;
   kubectl(c: Configuration): Kubectl;
   launcher?: string;
+  repo?(cwd: string): Promise<RepoInfo>;
   // Paseo gives hooks 30 seconds; stop waiting for a starting pod before that.
   startTimeoutMs?: number;
 };
@@ -25,10 +27,17 @@ export type LaunchInput = {
 export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap | undefined> {
   if (!input.workspaceId) return undefined;
   const c = await deps.configuration();
-  if (!c.workspaces.includes(input.workspaceId)) return undefined;
+  if (!optedIn(c, input.workspaceId)) return undefined;
   // A wrap from another plugin wins: Paseo rejects two different wraps.
   if (input.wrap) return undefined;
   let pod: string;
+  const mode = modeOf(c, input.workspaceId);
+  let repo: RepoInfo;
+  try {
+    repo = await (deps.repo ?? resolveRepo)(input.cwd);
+  } catch (e) {
+    throw new Error(`Kubernetes Sandbox could not read the workspace repository: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
   try {
     if (input.reuseOnly) {
       const name = podName(input.workspaceId);
@@ -36,7 +45,7 @@ export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap 
       pod = name;
     } else {
       pod = await withTimeout(
-        ensurePod(deps.kubectl(c), c, input.workspaceId),
+        ensurePod(deps.kubectl(c), c, input.workspaceId, repo),
         deps.startTimeoutMs ?? 25_000,
         "The sandbox pod is still starting. Try again in a moment.",
       );
@@ -46,7 +55,7 @@ export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap 
     throw new Error(`Kubernetes Sandbox could not start the pod: ${e instanceof Error ? e.message : "unknown error"}`);
   }
   return buildWrap(c, pod, {
-    cwd: input.cwd,
+    cwd: podCwd(c, mode, repo, input.cwd),
     envNames: forwardableEnv(input.env),
     ...(deps.launcher ? { launcher: deps.launcher } : {}),
   });

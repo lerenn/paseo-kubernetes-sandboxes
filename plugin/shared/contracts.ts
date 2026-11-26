@@ -16,6 +16,7 @@ export const podInfo = z.object({
   ready: z.boolean(),
   createdAt: z.string(),
   lastUsed: z.string().nullable(),
+  mode: z.enum(["shared", "clone"]),
 });
 
 // Cluster, RBAC and volume checks. Never needs more than the RBAC Role in config/plugin-rbac.yaml.
@@ -50,6 +51,7 @@ export const workspaceRow = z.object({
   name: z.string(),
   directory: z.string(),
   optedIn: z.boolean(),
+  mode: z.enum(["shared", "clone"]),
   pod: z.string(),
 });
 export const workspacesList = defineRpc({

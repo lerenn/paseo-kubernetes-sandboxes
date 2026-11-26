@@ -1,5 +1,5 @@
 // Pure helpers for the screen (no React, unit-tested).
-import type { Configuration } from "../shared/settings.js";
+import { modeOf, type Configuration, type Mode } from "../shared/settings.js";
 
 export type Tone = "muted" | "success" | "warning";
 export type CheckLike = { id: string; status: "ok" | "warn" | "fail" | "unknown" };
@@ -19,12 +19,16 @@ export function age(iso: string | null, now = Date.now()): string {
 export const phaseTone = (phase: string, ready: boolean): Tone =>
   ready ? "success" : phase === "Pending" || phase === "Terminating" ? "warning" : "muted";
 
-// What is still missing in the saved settings, in the order a user fixes it.
+// What is still missing in the saved settings for the storage modes in use, in the order a user fixes it.
 export function settingsProblems(c: Configuration): string[] {
+  const modes = new Set<Mode>(c.workspaces.length ? c.workspaces.map((w) => modeOf(c, w.id)) : [c.defaultMode]);
   const out: string[] = [];
   if (!c.image) out.push("Set the sandbox image.");
-  if (!c.worktree.claimName) out.push("Set the worktree volume claim.");
-  if (!c.worktree.mountPath.startsWith("/")) out.push("Set the worktree mount path (absolute).");
+  if (modes.has("shared")) {
+    if (!c.worktree.claimName) out.push("Set the worktree volume claim.");
+    if (!c.worktree.basePath.startsWith("/")) out.push("Set the worktree base path (absolute).");
+  }
+  if (modes.has("clone") && !c.clone.path.startsWith("/")) out.push("Set the clone path (absolute).");
   return out;
 }
 
@@ -38,7 +42,7 @@ export function setupSteps(saved: Configuration, checks: CheckLike[] | null): St
       id: "settings",
       label: "Settings",
       done: problems.length === 0,
-      detail: problems.length ? problems[0] : "Image and worktree volume are set.",
+      detail: problems.length ? problems[0] : "Image and storage are set.",
       tab: "settings",
     },
     {
@@ -58,8 +62,13 @@ export function setupSteps(saved: Configuration, checks: CheckLike[] | null): St
   ];
 }
 
-export function toggleWorkspace(ids: string[], id: string, on: boolean): string[] {
-  return on ? [...new Set([...ids, id])] : ids.filter((v) => v !== id);
+type Entry = Configuration["workspaces"][number];
+export function toggleWorkspace(entries: Entry[], id: string, on: boolean): Entry[] {
+  return on ? (entries.some((e) => e.id === id) ? entries : [...entries, { id }]) : entries.filter((e) => e.id !== id);
+}
+// `undefined` returns the workspace to the default mode.
+export function setWorkspaceMode(entries: Entry[], id: string, mode: Mode | undefined): Entry[] {
+  return entries.map((e) => (e.id === id ? (mode ? { id, mode } : { id }) : e));
 }
 
 const QUANTITY = /^(\d+\.?\d*|\.\d+)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/;
