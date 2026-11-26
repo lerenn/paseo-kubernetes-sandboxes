@@ -5,7 +5,7 @@ import { Badge, Button, Card, Choice, Disclosure, Field, JsonField, type Theme }
 import type { clusterCheck, podsList, sshInfo, workspacesList } from "../shared/contracts.js";
 import type { Configuration } from "../shared/settings.js";
 import { modeOf, podOverridesSchema, sidecarNamesOf, sidecarProblems, sidecarSchema, type Mode } from "../shared/settings.js";
-import { INDICATORS, age, phaseTone, plural, requirementRows, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
+import { ADVANCED_FIELDS, DEFAULTS, INDICATORS, age, draftProblems, durationLabel, problemOf, phaseTone, plural, requirementRows, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
 
 export type Body = { color: string; fontSize: number; lineHeight: number };
 export type SshStatus = z.output<typeof sshInfo>;
@@ -26,18 +26,24 @@ function Notice({ theme, text, children, danger = false }: { theme: Theme; text:
   );
 }
 
-function SaveBar(p: { theme: Theme; text: Body; busy: boolean; saved: boolean; ready: boolean; onSave(): void }) {
+function SaveBar(p: { theme: Theme; text: Body; busy: boolean; saved: boolean; ready: boolean; problem: string | null; onSave(): void }) {
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-        <Button theme={p.theme} label={p.busy ? "Working…" : "Save changes"} primary disabled={p.busy || !p.ready || p.saved} onPress={p.onSave} />
+        <Button theme={p.theme} label={p.busy ? "Working…" : "Save changes"} primary disabled={p.busy || !p.ready || p.saved || !!p.problem} onPress={p.onSave} />
       </View>
+      {p.problem && (
+        <Text accessibilityRole="alert" style={{ ...p.text, color: p.theme.colors.statusDanger }}>
+          Cannot save yet: {p.problem}
+        </Text>
+      )}
       {!p.saved && <Text style={p.text}>You have unsaved changes.</Text>}
     </View>
   );
 }
 
-type Common = { theme: Theme; text: Body; busy: boolean; saved: boolean; ready: boolean; onSave(): void };
+// `problem`: the first thing preventing a save (null when the draft is valid).
+type Common = { theme: Theme; text: Body; busy: boolean; saved: boolean; ready: boolean; problem: string | null; onSave(): void };
 
 export function OverviewTab(p: Common & { saved_: Configuration; status: ClusterStatus | null; pods: PodRows | null; go(tab: TabId): void }) {
   const { theme, text } = p;
@@ -168,7 +174,7 @@ export function ClusterTab(p: Common & { draft: Configuration; patch<K extends k
         <ExternalLink href={DOCS}>Full setup guide</ExternalLink>
       </Disclosure>
       <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-        <Button theme={theme} label="Save changes" primary disabled={p.busy || !p.ready || p.saved} onPress={p.onSave} />
+        <Button theme={theme} label="Save changes" primary disabled={p.busy || !p.ready || p.saved || !!p.problem} onPress={p.onSave} />
         <Button theme={theme} label="Check cluster" icon="RefreshCw" disabled={p.busy || !p.saved} onPress={p.onCheck} />
       </View>
       {!p.saved && <Text style={text}>Save your changes before checking the cluster.</Text>}
@@ -226,7 +232,7 @@ export function WorkspacesTab(p: Common & { draft: Configuration; patch<K extend
       )}
       <Notice theme={theme} text={text}>Shared worktree: the pod works on the daemon's files. Pod-local clone: the pod works on its own clone; Paseo's file tree, diffs and git status do not show it, and unpushed work is lost with the pod unless a volume is used. Sidecars follow the default selection until toggled here. Switching mode needs the pod deleted first. Changes apply to the next launch.</Notice>
       <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-        <Button theme={theme} label="Save changes" primary disabled={p.busy || !p.ready || p.saved} onPress={p.onSave} />
+        <Button theme={theme} label="Save changes" primary disabled={p.busy || !p.ready || p.saved || !!p.problem} onPress={p.onSave} />
         <Button theme={theme} label="Refresh" icon="RefreshCw" disabled={p.busy} onPress={p.onRefresh} />
       </View>
       {!p.saved && <Text style={text}>You have unsaved changes.</Text>}
@@ -289,67 +295,90 @@ export function PodsTab(p: { theme: Theme; text: Body; busy: boolean; pods: PodR
 
 export function SettingsTab(p: Common & { draft: Configuration; patch<K extends keyof Configuration>(k: K, v: Configuration[K]): void }) {
   const { theme, text, draft } = p;
+  const D = DEFAULTS;
+  const problems = draftProblems(draft);
+  const err = (field: string) => problemOf(problems, field);
   const r = draft.resources;
-  const res = (key: keyof Configuration["resources"], label: string) => (
-    <View style={{ flex: 1, minWidth: 160 }}>
-      <Field theme={theme} label={label} value={r[key]} onChange={(v) => p.patch("resources", { ...r, [key]: v })} hint={resourceIssue(label, r[key]) ?? undefined} disabled={p.busy} />
-    </View>
-  );
   const wt = draft.worktree;
   const rp = draft.repo;
   const cl = draft.clone;
+  const title = { ...text, color: theme.colors.foreground, fontWeight: "600" as const };
+  const res = (key: keyof Configuration["resources"], label: string, what: string) => (
+    <View style={{ flex: 1, minWidth: 220 }}>
+      <Field theme={theme} label={label} value={r[key]} onChange={(v) => p.patch("resources", { ...r, [key]: v })} placeholder={D.resources[key]} error={err(`resources.${key}`)} hint={`${what} Default: ${D.resources[key]}. Empty is not allowed.`} disabled={p.busy} />
+    </View>
+  );
+  const advancedProblems = problems.filter((x) => ADVANCED_FIELDS.includes(x.field));
   return (
-    <Card theme={theme} title="Settings" icon="SlidersHorizontal" description="How sandbox pods are built. Changes apply to pods created after saving.">
-      <Field theme={theme} label="Image" value={draft.image} onChange={(v) => p.patch("image", v)} placeholder="registry.example.com/dev-tools:latest" hint="Needs a shell and every program agents and terminals will run (git, the agent CLI, build tools)." disabled={p.busy} />
-      <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
-        {res("cpuRequest", "CPU request")}
-        {res("cpuLimit", "CPU limit")}
-      </View>
-      <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
-        {res("memoryRequest", "Memory request")}
-        {res("memoryLimit", "Memory limit")}
-      </View>
-      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Storage mode</Text>
-      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-        {(["shared", "clone"] as const).map((m) => (
-          <Button key={m} theme={theme} label={`Default: ${MODE_LABEL[m]}`} primary={draft.defaultMode === m} disabled={p.busy} onPress={() => p.patch("defaultMode", m)} />
-        ))}
-      </View>
-      <Text style={text}>Each workspace can override the default on the Workspaces tab.</Text>
-      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Shared worktree</Text>
-      <Field theme={theme} label="Worktree claim" value={wt.claimName} onChange={(v) => p.patch("worktree", { ...wt, claimName: v })} hint="PersistentVolumeClaim holding the daemon's worktrees (ReadWriteMany, or one node for ReadWriteOnce). The pod mounts each workspace's folder at its own absolute path." disabled={p.busy} />
-      <Field theme={theme} label="Worktree base path" value={wt.basePath} onChange={(v) => p.patch("worktree", { ...wt, basePath: v })} placeholder="/home/paseo/.paseo/worktrees" hint="Where the daemon sees that claim." disabled={p.busy} />
-      <Field theme={theme} label="Worktree sub path" value={wt.subPath} onChange={(v) => p.patch("worktree", { ...wt, subPath: v })} placeholder="Optional" hint="Directory of the claim that the base path maps to." disabled={p.busy} />
-      <Field theme={theme} label="Repository claim" value={rp.claimName} onChange={(v) => p.patch("repo", { ...rp, claimName: v })} placeholder="Same as the worktree claim" hint="Holds the main repositories. The pod mounts only the repository's .git directory, read-write, at its absolute path." disabled={p.busy} />
-      <Field theme={theme} label="Repository base path" value={rp.basePath} onChange={(v) => p.patch("repo", { ...rp, basePath: v })} placeholder="/workspace/src" hint="Where the daemon sees the repository claim." disabled={p.busy} />
-      <Field theme={theme} label="Repository sub path" value={rp.subPath} onChange={(v) => p.patch("repo", { ...rp, subPath: v })} placeholder="Optional" disabled={p.busy} />
-      <Notice theme={theme} text={text} danger>In shared mode the pod can read and write the whole repository: all branches and history, the repository config (remotes, possibly credentials), other worktrees' metadata and .git/hooks. Do not store credentials in the repository config.</Notice>
-      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Pod-local clone</Text>
-      <Field theme={theme} label="Clone path" value={cl.path} onChange={(v) => p.patch("clone", { ...cl, path: v })} hint="Where the pod clones the repository. Launches start here instead of the daemon's path." disabled={p.busy} />
-      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-        {(["emptyDir", "pvc"] as const).map((m) => (
-          <Button key={m} theme={theme} label={m === "pvc" ? "Per-sandbox volume" : "Pod storage (lost with the pod)"} primary={cl.storage === m} disabled={p.busy} onPress={() => p.patch("clone", { ...cl, storage: m })} />
-        ))}
-      </View>
-      {cl.storage === "pvc" && (
-        <>
-          <Field theme={theme} label="Volume size" value={cl.size} onChange={(v) => p.patch("clone", { ...cl, size: v })} hint={resourceIssue("Volume size", cl.size) ?? "Kept when the pod is deleted; removed when the workspace is archived."} disabled={p.busy} />
-          <Field theme={theme} label="Storage class" value={cl.storageClass} onChange={(v) => p.patch("clone", { ...cl, storageClass: v })} placeholder="Cluster default" disabled={p.busy} />
-        </>
-      )}
-      <Field theme={theme} label="Git Secret" value={cl.gitSecret} onChange={(v) => p.patch("clone", { ...cl, gitSecret: v })} placeholder="Optional" hint="Secret mounted at /etc/sandbox-git. Its gitconfig key is used as the global git config (for example a credential helper reading another key). Needed to clone and push private repositories." disabled={p.busy} />
-      <Notice theme={theme} text={text}>Pod-local clone: Paseo's file tree, diffs and git status read the daemon's disk and do not show what agents did in the pod. Results come back through git (commit, push, PR). Deleting the pod loses unpushed work unless a per-sandbox volume is used.</Notice>
-      <Field theme={theme} label="Run as user ID" value={String(draft.runAsUser)} onChange={(v) => p.patch("runAsUser", Math.max(0, Math.min(65535, Math.floor(Number(v) || 0))))} hint="Match the owner of the daemon's files (usually 1000). 0 keeps the image's user." disabled={p.busy} />
-      <Field theme={theme} label="Idle timeout (minutes)" value={String(draft.ttlMinutes)} onChange={(v) => p.patch("ttlMinutes", Math.max(0, Math.min(10080, Math.floor(Number(v) || 0))))} hint="Delete a pod that ran nothing for this long. 0 keeps pods until the workspace is archived." disabled={p.busy} />
-      <Field theme={theme} label="Environment Secret" value={draft.envSecret} onChange={(v) => p.patch("envSecret", v)} placeholder="Optional" hint="Name of a Secret in the namespace. Its keys become environment variables in the pod. Use it for credentials instead of environment variables forwarded by Paseo." disabled={p.busy} />
-      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Sidecars</Text>
-      <JsonField theme={theme} label="Sidecar templates (JSON)" value={draft.sidecars} disabled={p.busy} hint="A list of extra containers. See docs/setup.md (Sidecars) for the fields and a docker example. Applies to pods created afterwards." check={(v) => { const r = z.array(sidecarSchema).max(8).safeParse(v); return r.success ? sidecarProblems({ sidecars: r.data, defaultSidecars: [], workspaces: [] }) : r.error.issues[0]?.message ?? "Invalid sidecars."; }} onChange={(v) => p.patch("sidecars", z.array(sidecarSchema).parse(v))} />
-      {draft.sidecars.map((s) => (
-        <Choice key={s.name} theme={theme} label={`Sidecar ${s.name} by default`} description="Enabled for opted-in workspaces that do not choose their own sidecars (Workspaces tab)." checked={draft.defaultSidecars.includes(s.name)} onChange={(on) => p.patch("defaultSidecars", on ? [...draft.defaultSidecars, s.name] : draft.defaultSidecars.filter((n) => n !== s.name))} disabled={p.busy} />
-      ))}
-      <JsonField theme={theme} label="Pod overrides (JSON)" value={draft.podOverrides} disabled={p.busy} hint="Only runtimeClassName, tolerations, nodeSelector, priorityClassName and imagePullSecrets, for every sandbox pod." check={(v) => { const r = podOverridesSchema.safeParse(v); return r.success ? null : r.error.issues[0]?.message ?? "Invalid pod overrides."; }} onChange={(v) => p.patch("podOverrides", podOverridesSchema.parse(v))} />
-      <Notice theme={theme} text={text} danger>A privileged sidecar is root-equivalent on the node: weaker isolation than the base pod. The namespace's Pod Security level must allow it.</Notice>
-      <SaveBar theme={theme} text={text} busy={p.busy} saved={p.saved} ready={p.ready} onSave={p.onSave} />
-    </Card>
+    <>
+      <Card theme={theme} title="Image and resources" icon="Cpu" description="The container image of every sandbox pod and how much CPU and memory it may use. Changes apply to pods created after saving.">
+        <Field theme={theme} label="Image" value={draft.image} onChange={(v) => p.patch("image", v)} placeholder="registry.example.com/dev-tools:latest" hint="The container image the pod runs. It needs a shell and every program agents and terminals will run (git, the agent CLI, build tools). Default: none; while empty, no pod can start." disabled={p.busy} />
+        <Text style={title}>CPU</Text>
+        <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
+          {res("cpuRequest", "CPU request", "CPU the cluster reserves for the pod. Example: 250m (a quarter core).")}
+          {res("cpuLimit", "CPU limit", "The most CPU the pod may use. Example: 2.")}
+        </View>
+        <Text style={title}>Memory</Text>
+        <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
+          {res("memoryRequest", "Memory request", "Memory the cluster reserves. Example: 512Mi.")}
+          {res("memoryLimit", "Memory limit", "The pod is killed above this. Example: 4Gi.")}
+        </View>
+      </Card>
+      <Card theme={theme} title="Storage" icon="HardDrive" description="Where a sandbox finds the code. Each workspace can override the default mode on the Workspaces tab.">
+        <Text style={title}>Default storage mode</Text>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          {(["shared", "clone"] as const).map((m) => (
+            <Button key={m} theme={theme} label={`${MODE_LABEL[m]}${m === D.defaultMode ? " (default)" : ""}`} primary={draft.defaultMode === m} disabled={p.busy} onPress={() => p.patch("defaultMode", m)} />
+          ))}
+        </View>
+        <Text style={text}>Shared worktree: the pod mounts the daemon's worktree volume, so files are the same as on the daemon. Pod-local clone: the pod clones the repository into its own storage (see Advanced).</Text>
+        <Text style={title}>Worktree volume (Shared worktree mode)</Text>
+        <Field theme={theme} label="Worktree claim" value={wt.claimName} onChange={(v) => p.patch("worktree", { ...wt, claimName: v })} placeholder="paseo-worktrees" error={err("worktree.claimName")} hint="Name of the PersistentVolumeClaim, in the sandbox namespace, that holds the daemon's worktrees (ReadWriteMany, or one node for ReadWriteOnce). Default: none; Shared worktree mode needs it." disabled={p.busy} />
+        <Field theme={theme} label="Worktree mount path" value={wt.basePath} onChange={(v) => p.patch("worktree", { ...wt, basePath: v })} placeholder="/home/paseo/.paseo/worktrees" error={err("worktree.basePath")} hint="The absolute path where the daemon sees that volume. The pod mounts each workspace's folder at its own path under it. Default: none; Shared worktree mode needs it." disabled={p.busy} />
+        <Field theme={theme} label="Worktree sub path" value={wt.subPath} onChange={(v) => p.patch("worktree", { ...wt, subPath: v })} placeholder="Optional, for example worktrees" hint="Directory of the claim that the mount path maps to. Default: empty, the root of the claim." disabled={p.busy} />
+        <Field theme={theme} label="Repository base path" value={rp.basePath} onChange={(v) => p.patch("repo", { ...rp, basePath: v })} placeholder="/workspace/src" error={err("repo.basePath")} hint="The absolute path where the daemon sees the main repositories. The pod mounts only each repository's .git directory from there. Default: empty." disabled={p.busy} />
+        <Notice theme={theme} text={text} danger>In shared mode the pod can read and write the whole repository: all branches and history, the repository config (remotes, possibly credentials), other worktrees' metadata and .git/hooks. Do not store credentials in the repository config.</Notice>
+      </Card>
+      <Card theme={theme} title="Advanced" icon="Wrench" description="Rarely needed. Every field has a working default.">
+        <Disclosure theme={theme} title="Show advanced settings" label="Advanced settings" summary={advancedProblems.length ? `${plural(advancedProblems.length, "problem")} inside: ${advancedProblems[0].message}` : "Cleanup, run-as user, Secrets, pod-local clone, repository volume, sidecars, pod overrides."}>
+          <Text style={title}>Cleanup</Text>
+          <Field theme={theme} label="Idle timeout (minutes)" value={String(draft.ttlMinutes)} onChange={(v) => p.patch("ttlMinutes", Math.max(0, Math.min(10080, Math.floor(Number(v) || 0))))} placeholder={String(D.ttlMinutes)} hint={`Delete a pod that ran nothing for this long (0 to 10080). Example: 60. Default: ${durationLabel(D.ttlMinutes)}. 0 keeps pods until the workspace is archived.`} disabled={p.busy} />
+          <Text style={title}>Identity</Text>
+          <Field theme={theme} label="Run as user ID" value={String(draft.runAsUser)} onChange={(v) => p.patch("runAsUser", Math.max(0, Math.min(65535, Math.floor(Number(v) || 0))))} placeholder={String(D.runAsUser)} hint={`The numeric user the pod runs as. Match the owner of the daemon's files. Default: ${D.runAsUser}. 0 keeps the image's own user.`} disabled={p.busy} />
+          <Text style={title}>Credentials</Text>
+          <Field theme={theme} label="Environment Secret" value={draft.envSecret} onChange={(v) => p.patch("envSecret", v)} placeholder="my-agent-env" error={err("envSecret")} hint="Name of a Secret in the sandbox namespace. Each key becomes an environment variable in the pod; use it for credentials instead of variables forwarded by Paseo. Default: empty, no Secret." disabled={p.busy} />
+          <Text style={text}>Git over SSH (key file and known_hosts) is on the Cluster tab.</Text>
+          <Text style={title}>Pod-local clone</Text>
+          <Text style={text}>Used by workspaces in Pod-local clone mode.</Text>
+          <Field theme={theme} label="Clone path" value={cl.path} onChange={(v) => p.patch("clone", { ...cl, path: v })} placeholder={D.clone.path} error={err("clone.path")} hint={`Absolute path in the pod where the repository is cloned; launches start here. Default: ${D.clone.path}.`} disabled={p.busy} />
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            {(["emptyDir", "pvc"] as const).map((m) => (
+              <Button key={m} theme={theme} label={`${m === "pvc" ? "Per-sandbox volume" : "Pod storage (lost with the pod)"}${m === D.clone.storage ? " (default)" : ""}`} primary={cl.storage === m} disabled={p.busy} onPress={() => p.patch("clone", { ...cl, storage: m })} />
+            ))}
+          </View>
+          {cl.storage === "pvc" && (
+            <>
+              <Field theme={theme} label="Volume size" value={cl.size} onChange={(v) => p.patch("clone", { ...cl, size: v })} placeholder={D.clone.size} error={err("clone.size")} hint={`Size of the per-sandbox volume. Kept when the pod is deleted; removed when the workspace is archived. Default: ${D.clone.size}.`} disabled={p.busy} />
+              <Field theme={theme} label="Storage class" value={cl.storageClass} onChange={(v) => p.patch("clone", { ...cl, storageClass: v })} placeholder="Cluster default" hint="Default: empty, the cluster's default storage class." disabled={p.busy} />
+            </>
+          )}
+          <Field theme={theme} label="Git Secret" value={cl.gitSecret} onChange={(v) => p.patch("clone", { ...cl, gitSecret: v })} placeholder="my-git-config" error={err("clone.gitSecret")} hint="Name of a Secret you manage, mounted at /etc/sandbox-git; its gitconfig key becomes the global git config (for example a credential helper for HTTPS). Default: empty, none. For SSH, use Git over SSH on the Cluster tab." disabled={p.busy} />
+          <Notice theme={theme} text={text}>Pod-local clone: Paseo's file tree, diffs and git status read the daemon's disk and do not show what agents did in the pod. Results come back through git (commit, push, PR). Deleting the pod loses unpushed work unless a per-sandbox volume is used.</Notice>
+          <Text style={title}>Repository volume</Text>
+          <Field theme={theme} label="Repository claim" value={rp.claimName} onChange={(v) => p.patch("repo", { ...rp, claimName: v })} placeholder="Same as the worktree claim" error={err("repo.claimName")} hint="Only if the main repositories are on a different PersistentVolumeClaim than the worktrees. Default: empty, the worktree claim is reused." disabled={p.busy} />
+          <Field theme={theme} label="Repository sub path" value={rp.subPath} onChange={(v) => p.patch("repo", { ...rp, subPath: v })} placeholder="Optional" hint="Directory of the repository claim that the repository base path maps to. Default: empty." disabled={p.busy} />
+          <Text style={title}>Sidecars</Text>
+          <JsonField theme={theme} label="Sidecar templates (JSON)" value={draft.sidecars} disabled={p.busy} hint="A list of extra containers (for example docker). Default: [] (none). See docs/setup.md, Sidecars. Applies to pods created afterwards." check={(v) => { const r = z.array(sidecarSchema).max(8).safeParse(v); return r.success ? sidecarProblems({ sidecars: r.data, defaultSidecars: [], workspaces: [] }) : r.error.issues[0]?.message ?? "Invalid sidecars."; }} onChange={(v) => p.patch("sidecars", z.array(sidecarSchema).parse(v))} />
+          {err("sidecars") && <Text style={{ ...text, color: theme.colors.statusDanger }} accessibilityRole="alert">{err("sidecars")}</Text>}
+          {draft.sidecars.map((s) => (
+            <Choice key={s.name} theme={theme} label={`Sidecar ${s.name} by default`} description="Enabled for opted-in workspaces that do not choose their own sidecars (Workspaces tab). Default: off." checked={draft.defaultSidecars.includes(s.name)} onChange={(on) => p.patch("defaultSidecars", on ? [...draft.defaultSidecars, s.name] : draft.defaultSidecars.filter((n) => n !== s.name))} disabled={p.busy} />
+          ))}
+          <Notice theme={theme} text={text} danger>A privileged sidecar is root-equivalent on the node: weaker isolation than the base pod. The namespace's Pod Security level must allow it.</Notice>
+          <Text style={title}>Pod overrides</Text>
+          <JsonField theme={theme} label="Pod overrides (JSON)" value={draft.podOverrides} disabled={p.busy} hint="Only runtimeClassName, tolerations, nodeSelector, priorityClassName and imagePullSecrets, applied to every sandbox pod. Default: none set." check={(v) => { const r = podOverridesSchema.safeParse(v); return r.success ? null : r.error.issues[0]?.message ?? "Invalid pod overrides."; }} onChange={(v) => p.patch("podOverrides", podOverridesSchema.parse(v))} />
+        </Disclosure>
+      </Card>
+      <SaveBar theme={theme} text={text} busy={p.busy} saved={p.saved} ready={p.ready} problem={p.problem} onSave={p.onSave} />
+    </>
   );
 }

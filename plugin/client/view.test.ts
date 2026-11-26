@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { settingsSchema } from "../shared/settings.js";
-import { INDICATORS, NOT_CHECKED, age, indicatorOf, requirementRows, phaseTone, resourceIssue, setWorkspaceMode, setWorkspaceSidecars, setupSteps, settingsProblems, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
+import { ADVANCED_FIELDS, DEFAULTS, INDICATORS, draftProblems, durationLabel, problemOf, NOT_CHECKED, age, indicatorOf, requirementRows, phaseTone, resourceIssue, setWorkspaceMode, setWorkspaceSidecars, setupSteps, settingsProblems, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
 
 test("age formats elapsed time", () => {
   const now = Date.parse("2026-01-02T00:00:00Z");
@@ -115,4 +115,41 @@ test("volume and secret rows only appear when they apply", () => {
   const rows = byId(requirementRows(ssh, [{ id: "secrets", status: "ok", detail: "yes" }]));
   assert.equal(rows.secrets.indicator, "verified");
   assert.equal(byId(requirementRows(ssh, null)).secrets.indicator, "unverified");
+});
+
+test("defaults come from the schema", () => {
+  assert.deepEqual(DEFAULTS, settingsSchema.parse({}));
+  assert.equal(DEFAULTS.ttlMinutes, 120);
+  assert.equal(durationLabel(DEFAULTS.ttlMinutes), "2 hours");
+  assert.equal(durationLabel(90), "90 minutes");
+  assert.equal(durationLabel(1), "1 minute");
+  assert.match(durationLabel(0), /never/);
+});
+
+test("a fresh draft has no blocking problem; incomplete settings are not problems", () => {
+  assert.deepEqual(draftProblems(DEFAULTS), []);
+});
+
+test("draftProblems ties each invalid value to its field", () => {
+  const bad = {
+    ...DEFAULTS,
+    resources: { ...DEFAULTS.resources, cpuLimit: "lots" },
+    worktree: { ...DEFAULTS.worktree, claimName: "Bad_Name", basePath: "relative" },
+    envSecret: "UPPER",
+    clone: { ...DEFAULTS.clone, path: "rel", storage: "pvc" as const, size: "big" },
+  };
+  const p = draftProblems(bad);
+  for (const f of ["resources.cpuLimit", "worktree.claimName", "worktree.basePath", "envSecret", "clone.path", "clone.size"]) assert.ok(problemOf(p, f), f);
+  assert.equal(problemOf(p, "resources.cpuRequest"), undefined);
+  // the volume size is only checked when the per-sandbox volume is used
+  assert.equal(problemOf(draftProblems({ ...DEFAULTS, clone: { ...DEFAULTS.clone, size: "big" } }), "clone.size"), undefined);
+});
+
+test("draftProblems reports sidecar and ssh problems", () => {
+  const sidecar = { name: "main", image: "i" };
+  const sc = { ...DEFAULTS, sidecars: [settingsSchema.parse({ sidecars: [{ name: "x", image: "i" }] }).sidecars[0], { ...settingsSchema.parse({ sidecars: [{ name: "x", image: "i" }] }).sidecars[0], name: sidecar.name }] };
+  assert.match(problemOf(draftProblems(sc), "sidecars")!, /reserved/);
+  const ssh = { ...DEFAULTS, ssh: { keyFile: "/k", knownHostsFile: "" } };
+  assert.match(problemOf(draftProblems(ssh), "ssh")!, /known_hosts/);
+  assert.ok(ADVANCED_FIELDS.includes("sidecars") && !ADVANCED_FIELDS.includes("worktree.basePath"));
 });

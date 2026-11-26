@@ -1,5 +1,5 @@
 // Pure helpers for the screen (no React, unit-tested).
-import { MIN_PASEO_VERSION, QUANTITY, modeOf, type Configuration, type Mode } from "../shared/settings.js";
+import { MIN_PASEO_VERSION, QUANTITY, modeOf, resourceName, settingsSchema, sidecarProblems, sshProblems, type Configuration, type Mode } from "../shared/settings.js";
 
 export type Tone = "muted" | "success" | "warning";
 export type CheckLike = { id: string; status: "ok" | "warn" | "fail" | "unknown"; detail?: string };
@@ -138,3 +138,50 @@ export const validQuantity = (v: string) => QUANTITY.test(v.trim());
 export function resourceIssue(label: string, value: string): string | null {
   return validQuantity(value) ? null : `${label} must be a Kubernetes quantity, for example 500m or 2Gi.`;
 }
+
+// --- Settings tab -------------------------------------------------------------------------------------
+// The defaults shown next to each field come from the schema itself, so they cannot drift from what is stored.
+export const DEFAULTS: Configuration = settingsSchema.parse({});
+
+export function durationLabel(minutes: number): string {
+  if (minutes === 0) return "never (pods are kept until the workspace is archived)";
+  if (minutes % 60 === 0) return plural(minutes / 60, "hour");
+  return plural(minutes, "minute");
+}
+
+export type Problem = { field: string; message: string };
+const absolute = (field: string, label: string, v: string): Problem[] => (v && !v.startsWith("/") ? [{ field, message: `${label} must be an absolute path (start with /).` }] : []);
+const name = (field: string, label: string, v: string): Problem[] =>
+  v && !resourceName.safeParse(v).success ? [{ field, message: `${label} must be a Kubernetes name: lowercase letters, digits and dashes, at most 63 characters.` }] : [];
+
+// Values that cannot be saved or would break a pod, each tied to the field that shows it. Incomplete but valid
+// settings (an empty image or claim) are not problems here: the Setup card reports them.
+export function draftProblems(c: Configuration): Problem[] {
+  const out: Problem[] = [];
+  const r = c.resources;
+  for (const [key, label] of [["cpuRequest", "CPU request"], ["cpuLimit", "CPU limit"], ["memoryRequest", "Memory request"], ["memoryLimit", "Memory limit"]] as const) {
+    const issue = resourceIssue(label, r[key]);
+    if (issue) out.push({ field: `resources.${key}`, message: issue });
+  }
+  out.push(...name("worktree.claimName", "Worktree claim", c.worktree.claimName), ...name("repo.claimName", "Repository claim", c.repo.claimName));
+  out.push(...absolute("worktree.basePath", "Worktree base path", c.worktree.basePath), ...absolute("repo.basePath", "Repository base path", c.repo.basePath));
+  out.push(...absolute("clone.path", "Clone path", c.clone.path));
+  if (c.clone.storage === "pvc") {
+    const issue = resourceIssue("Volume size", c.clone.size);
+    if (issue) out.push({ field: "clone.size", message: issue });
+  }
+  out.push(...name("clone.gitSecret", "Git Secret", c.clone.gitSecret), ...name("envSecret", "Environment Secret", c.envSecret));
+  const sidecar = sidecarProblems(c);
+  if (sidecar) out.push({ field: "sidecars", message: sidecar });
+  const ssh = sshProblems(c.ssh);
+  if (ssh) out.push({ field: "ssh", message: ssh });
+  // Anything the schema still rejects (lengths, absolute SSH paths, ...) blocks saving too.
+  if (!out.length) {
+    const parsed = settingsSchema.safeParse(c);
+    if (!parsed.success) out.push({ field: "form", message: parsed.error.issues[0]?.message ?? "Some settings are invalid." });
+  }
+  return out;
+}
+export const problemOf = (problems: Problem[], field: string): string | undefined => problems.find((p) => p.field === field)?.message;
+// Problems of the fields of the Advanced section, for its collapsed summary.
+export const ADVANCED_FIELDS = ["repo.claimName", "clone.path", "clone.size", "clone.gitSecret", "envSecret", "sidecars"];

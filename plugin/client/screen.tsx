@@ -4,6 +4,7 @@ import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/cl
 import { ExternalLink, Loading, ScrollView, Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { sandboxSettings, settingsSchema, type Configuration } from "../shared/settings.js";
 import { clusterCheck, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "../shared/contracts.js";
+import { draftProblems } from "./view.js";
 import { ClusterTab, OverviewTab, PodsTab, SettingsTab, WorkspacesTab, type ClusterStatus, type SshStatus, type PodRows, type TabId, type WorkspaceRows } from "./tabs.js";
 
 const TABS = [
@@ -79,7 +80,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     });
   const text = { color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 21 };
   const pad = layout.compact ? 16 : 28;
-  const common = { theme, text, busy, saved, ready, onSave: () => void save() };
+  const common = { theme, text, busy, saved, ready, problem: draftProblems(draft)[0]?.message ?? null, onSave: () => void save() };
   const savedValues = ready ? settings.values : draft;
 
   return (
