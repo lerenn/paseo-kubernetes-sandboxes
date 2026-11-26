@@ -3,8 +3,8 @@ import { Pressable, Text, View } from "react-native";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { ExternalLink, Loading, ScrollView, Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { sandboxSettings, settingsSchema, type Configuration } from "../shared/settings.js";
-import { clusterCheck, podsDelete, podsList, podsLogs, workspacesList } from "../shared/contracts.js";
-import { ClusterTab, OverviewTab, PodsTab, SettingsTab, WorkspacesTab, type ClusterStatus, type PodRows, type TabId, type WorkspaceRows } from "./tabs.js";
+import { clusterCheck, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "../shared/contracts.js";
+import { ClusterTab, OverviewTab, PodsTab, SettingsTab, WorkspacesTab, type ClusterStatus, type SshStatus, type PodRows, type TabId, type WorkspaceRows } from "./tabs.js";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: "Gauge" },
@@ -21,7 +21,11 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     listPodsRpc = useRpc(podsList),
     deletePodRpc = useRpc(podsDelete),
     logsRpc = useRpc(podsLogs),
-    workspacesRpc = useRpc(workspacesList);
+    workspacesRpc = useRpc(workspacesList),
+    sshStatusRpc = useRpc(sshStatus),
+    sshSyncRpc = useRpc(sshSync),
+    sshRemoveRpc = useRpc(sshRemove);
+  const [ssh, setSsh] = useState<SshStatus | null>(null);
   const [draft, setDraft] = useState<Configuration>(settingsSchema.parse({}));
   const [tab, setTab] = useState<TabId>("overview");
   const [status, setStatus] = useState<ClusterStatus | null>(null);
@@ -119,7 +123,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           )}
           {settings.status === "invalid" && <Text style={text}>The saved settings are invalid. Save new values to replace them.</Text>}
           {tab === "overview" && <OverviewTab {...common} saved_={savedValues} status={status} pods={pods} go={setTab} />}
-          {tab === "cluster" && <ClusterTab {...common} draft={draft} patch={patch} status={status} onCheck={() => void action(runCheck)} />}
+          {tab === "cluster" && <ClusterTab {...common} draft={draft} patch={patch} status={status} onCheck={() => void action(runCheck)} ssh={ssh} onSshRefresh={() => void action(async () => setSsh(await sshStatusRpc({})))} onSshSync={() => void action(async () => { setSsh(await sshSyncRpc({})); toast.show("SSH Secret synced."); })} onSshRemove={() => void action(async () => { setSsh(await sshRemoveRpc({})); toast.show("SSH Secret removed."); })} />}
           {tab === "workspaces" && <WorkspacesTab {...common} draft={draft} patch={patch} rows={rows} onRefresh={() => void action(loadWorkspaces)} />}
           {tab === "pods" && (
             <PodsTab

@@ -1,12 +1,13 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { execFile } from "node:child_process";
-import { clusterCheck, podsDelete, podsList, podsLogs, workspacesList } from "./shared/contracts.js";
+import { clusterCheck, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "./shared/contracts.js";
 import { modeOf, optedIn, sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
 import { podName } from "./shared/sandbox.js";
 import { connection, kubectlBinary } from "./server/kubectl.js";
 import { checkCluster } from "./server/cluster.js";
 import { deleteClonePvc, deletePod, listPodsWithUsage, podLogs, sweep } from "./server/pods.js";
+import { removeSsh, sshStatus as readSshStatus, syncSsh } from "./server/ssh.js";
 import { wrapFor, type HookDeps } from "./server/hooks.js";
 
 const SWEEP_MS = 60_000;
@@ -47,7 +48,10 @@ export default function contribute(server: PluginServerContext) {
     const c = await configuration();
     // First sweep after the plugin starts also removes pods of workspaces that no longer exist.
     const known = swept ? undefined : await knownWorkspaces(active);
-    await sweep(connection(c), c, known ? { knownWorkspaces: known } : {});
+    const run = connection(c);
+    // Pick up a changed key file (compares hashes; the content is never logged).
+    await syncSsh(run, c).catch(() => console.error("Kubernetes Sandbox could not sync the SSH Secret; check the key file and RBAC."));
+    await sweep(run, c, known ? { knownWorkspaces: known } : {});
     swept = true;
   }
   let sweeping = false;
@@ -80,6 +84,23 @@ export default function contribute(server: PluginServerContext) {
   server.handle(podsLogs, async ({ name }) => {
     const c = await configuration();
     return { text: await podLogs(connection(c), name) };
+  });
+  server.handle(sshStatus, async () => {
+    const c = await configuration();
+    return readSshStatus(connection(c), c);
+  });
+  server.handle(sshSync, async () => {
+    const c = await configuration();
+    if (c.ssh.keyFile === "") throw new Error("Set an SSH key file and a known_hosts file first.");
+    const run = connection(c);
+    await syncSsh(run, c);
+    return readSshStatus(run, c);
+  });
+  server.handle(sshRemove, async () => {
+    const c = await configuration();
+    const run = connection(c);
+    await removeSsh(run);
+    return readSshStatus(run, c);
   });
   server.handle(workspacesList, async (_, { paseo }) => {
     attach(paseo);

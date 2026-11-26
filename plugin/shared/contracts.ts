@@ -60,3 +60,17 @@ export const workspacesList = defineRpc({
   input: z.object({}),
   output: z.object({ workspaces: z.array(workspaceRow) }),
 });
+
+// Status of the plugin-managed SSH Secret. Only a hash prefix is ever returned, never content.
+export const sshInfo = z.object({
+  configured: z.boolean(),
+  present: z.boolean(),
+  hashPrefix: z.string(),
+  syncedAt: z.string().nullable(),
+  // The Secret matches the key and known_hosts files currently on the daemon host.
+  inSync: z.boolean(),
+  problem: z.string().nullable(),
+});
+export const sshStatus = defineRpc({ name: "ssh.status", input: z.object({}), output: sshInfo });
+export const sshSync = defineRpc({ name: "ssh.sync", input: z.object({}), output: sshInfo });
+export const sshRemove = defineRpc({ name: "ssh.remove", input: z.object({}), output: sshInfo });

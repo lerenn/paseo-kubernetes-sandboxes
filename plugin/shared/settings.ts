@@ -41,8 +41,19 @@ export const cloneSchema = z.object({
   gitSecret: optionalName.default(""),
 });
 
+// Git over SSH. Both are paths on the DAEMON HOST, read only when the plugin syncs the Secret (never at
+// parse time, never logged). An empty `keyFile` disables the feature.
+const absolutePath = z.union([z.literal(""), z.string().max(4096).startsWith("/", "The path must be absolute.")]);
+export const sshSchema = z.object({
+  // A dedicated private key (a deploy key or machine user). Never point this at a personal key.
+  keyFile: absolutePath.default(""),
+  // known_hosts content pinning the git hosts' keys (for example github.com). Required with a key: the
+  // plugin never fetches host keys on its own.
+  knownHostsFile: absolutePath.default(""),
+});
+
 // Names a sidecar may not take: they belong to the plugin's own containers and volumes.
-export const RESERVED_NAMES = ["main", "clone", "worktree", "repo-git", "git"];
+export const RESERVED_NAMES = ["main", "clone", "worktree", "repo-git", "git", "ssh"];
 const sidecarName = z
   .string()
   .max(50)
@@ -137,6 +148,7 @@ const baseSchema = z.object({
   sidecars: z.array(sidecarSchema).max(8).default([]),
   defaultSidecars: z.array(sidecarName).max(8).default([]),
   podOverrides: podOverridesSchema.default(podOverridesSchema.parse({})),
+  ssh: sshSchema.default(sshSchema.parse({})),
   // Optional Secret whose keys are exposed as environment variables in the pod (envFrom).
   envSecret: optionalName.default(""),
   // Workspaces that run in a sandbox. Everything else keeps running locally.
@@ -159,8 +171,14 @@ export function sidecarProblems(c: Pick<z.output<typeof baseSchema>, "sidecars" 
   return unknown ? `Sidecar "${unknown}" is selected but not defined.` : null;
 }
 
+export function sshProblems(s: z.output<typeof sshSchema>): string | null {
+  if (s.keyFile && !s.knownHostsFile) return "Git over SSH needs a known_hosts file to pin the git hosts (strict host key checking).";
+  if (!s.keyFile && s.knownHostsFile) return "A known_hosts file is set without an SSH key file.";
+  return null;
+}
+
 export const settingsSchema = baseSchema.superRefine((c, ctx) => {
-  const problem = sidecarProblems(c);
+  const problem = sidecarProblems(c) ?? sshProblems(c.ssh);
   if (problem) ctx.addIssue({ code: "custom", message: problem });
 });
 export type Configuration = z.output<typeof settingsSchema>;

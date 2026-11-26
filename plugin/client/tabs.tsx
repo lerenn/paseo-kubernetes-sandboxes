@@ -2,12 +2,13 @@ import { Text, View } from "react-native";
 import { ExternalLink, Icon } from "@getpaseo/plugin/client/ui";
 import { z } from "zod";
 import { Badge, Button, Card, Choice, Disclosure, Field, JsonField, type Theme } from "./components.js";
-import type { clusterCheck, podsList, workspacesList } from "../shared/contracts.js";
+import type { clusterCheck, podsList, sshInfo, workspacesList } from "../shared/contracts.js";
 import type { Configuration } from "../shared/settings.js";
 import { MIN_PASEO_VERSION, modeOf, podOverridesSchema, sidecarNamesOf, sidecarProblems, sidecarSchema, type Mode } from "../shared/settings.js";
 import { age, phaseTone, plural, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar, type Tone } from "./view.js";
 
 export type Body = { color: string; fontSize: number; lineHeight: number };
+export type SshStatus = z.output<typeof sshInfo>;
 export type ClusterStatus = z.output<typeof clusterCheck.output>;
 export type PodRows = z.output<typeof podsList.output>["pods"];
 export type WorkspaceRows = z.output<typeof workspacesList.output>["workspaces"];
@@ -110,7 +111,7 @@ export function OverviewTab(p: Common & { saved_: Configuration; status: Cluster
   );
 }
 
-export function ClusterTab(p: Common & { draft: Configuration; patch<K extends keyof Configuration>(k: K, v: Configuration[K]): void; status: ClusterStatus | null; onCheck(): void }) {
+export function ClusterTab(p: Common & { draft: Configuration; patch<K extends keyof Configuration>(k: K, v: Configuration[K]): void; status: ClusterStatus | null; onCheck(): void; ssh: SshStatus | null; onSshRefresh(): void; onSshSync(): void; onSshRemove(): void }) {
   const { theme, text, draft } = p;
   const failing = p.status?.checks.some((c) => c.status === "fail");
   return (
@@ -140,6 +141,21 @@ export function ClusterTab(p: Common & { draft: Configuration; patch<K extends k
           ))}
         </View>
       )}
+      <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>Git over SSH</Text>
+      <Field theme={theme} label="SSH key file" value={draft.ssh.keyFile} onChange={(v) => p.patch("ssh", { ...draft.ssh, keyFile: v })} placeholder="Optional, absolute path on the daemon host" hint="A DEDICATED deploy key or machine-user key, never a personal key. The plugin copies it into one Secret in the namespace." disabled={p.busy} />
+      <Field theme={theme} label="known_hosts file" value={draft.ssh.knownHostsFile} onChange={(v) => p.patch("ssh", { ...draft.ssh, knownHostsFile: v })} placeholder="Absolute path on the daemon host" hint="Pins the git hosts' keys (for example github.com). Required with a key; host keys are never fetched automatically." disabled={p.busy} />
+      <Notice theme={theme} text={text} danger>The key is readable by every process in the pod, and by anyone who can read Secrets in the namespace or use the daemon's cluster identity. Use a deploy key limited to the repositories agents work on.</Notice>
+      {p.ssh && (
+        <Text style={text}>
+          {!p.ssh.configured ? "Not configured." : p.ssh.problem ?? (p.ssh.present ? `Secret present · ${p.ssh.hashPrefix} · ${p.ssh.inSync ? "matches the files" : "differs from the files (sync it)"} · synced ${p.ssh.syncedAt ?? "unknown"}` : "Secret absent. It is created with the next pod, or press Sync.")}
+          {!p.ssh.configured && p.ssh.present ? ` A Secret (${p.ssh.hashPrefix}) is still in the namespace: remove it.` : ""}
+        </Text>
+      )}
+      <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+        <Button theme={theme} label="SSH status" icon="RefreshCw" disabled={p.busy || !p.saved} onPress={p.onSshRefresh} />
+        <Button theme={theme} label="Sync Secret" disabled={p.busy || !p.saved || !draft.ssh.keyFile} onPress={p.onSshSync} />
+        <Button theme={theme} label="Remove Secret" icon="Trash2" disabled={p.busy || !p.saved} onPress={p.onSshRemove} />
+      </View>
       <Disclosure theme={theme} title="RBAC setup" summary="The Role the plugin needs">
         <Text style={text}>Apply the Role in your namespace and bind it to the identity kubectl uses on the daemon host:</Text>
         <View style={{ padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface0 }}>

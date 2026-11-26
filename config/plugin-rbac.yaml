@@ -24,3 +24,13 @@ rules:
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
     verbs: [get, list, create, delete]
+  # Git over SSH (optional): the plugin manages ONE Secret with this fixed name. `create` cannot be
+  # restricted by name; the other verbs are. `get` is needed to compare the content hash annotation.
+  # Whoever holds these rights on that Secret can read the key: grant them only to the daemon identity.
+  - apiGroups: ['']
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: ['']
+    resources: [secrets]
+    resourceNames: [paseo-sandbox-ssh]
+    verbs: [get, update, patch, delete]

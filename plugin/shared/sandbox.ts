@@ -17,3 +17,11 @@ export function podName(workspaceId: string): string {
 }
 export const ANNOTATION_MODE = "sandbox.paseo.sh/mode";
 export const cloneClaimName = (workspaceId: string) => `${podName(workspaceId)}-clone`;
+
+// Git over SSH: one plugin-managed Secret, mounted read-only in the main (and clone) containers only.
+export const SSH_SECRET_NAME = "paseo-sandbox-ssh";
+export const SSH_MOUNT_PATH = "/etc/sandbox-ssh";
+export const SSH_KEY_ITEM = "ssh-privatekey";
+export const SSH_KNOWN_HOSTS_ITEM = "known_hosts";
+export const ANNOTATION_SSH_HASH = "sandbox.paseo.sh/content-sha256";
+export const ANNOTATION_SSH_SYNCED = "sandbox.paseo.sh/synced-at";
