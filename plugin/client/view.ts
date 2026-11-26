@@ -1,8 +1,8 @@
 // Pure helpers for the screen (no React, unit-tested).
-import { QUANTITY, modeOf, type Configuration, type Mode } from "../shared/settings.js";
+import { MIN_PASEO_VERSION, QUANTITY, modeOf, type Configuration, type Mode } from "../shared/settings.js";
 
 export type Tone = "muted" | "success" | "warning";
-export type CheckLike = { id: string; status: "ok" | "warn" | "fail" | "unknown" };
+export type CheckLike = { id: string; status: "ok" | "warn" | "fail" | "unknown"; detail?: string };
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -20,8 +20,10 @@ export const phaseTone = (phase: string, ready: boolean): Tone =>
   ready ? "success" : phase === "Pending" || phase === "Terminating" ? "warning" : "muted";
 
 // What is still missing in the saved settings for the storage modes in use, in the order a user fixes it.
+const modesInUse = (c: Configuration) => new Set<Mode>(c.workspaces.length ? c.workspaces.map((w) => modeOf(c, w.id)) : [c.defaultMode]);
+
 export function settingsProblems(c: Configuration): string[] {
-  const modes = new Set<Mode>(c.workspaces.length ? c.workspaces.map((w) => modeOf(c, w.id)) : [c.defaultMode]);
+  const modes = modesInUse(c);
   const out: string[] = [];
   if (!c.image) out.push("Set the sandbox image.");
   if (modes.has("shared")) {
@@ -60,6 +62,55 @@ export function setupSteps(saved: Configuration, checks: CheckLike[] | null): St
       tab: "workspaces",
     },
   ];
+}
+
+// --- Requirements card -------------------------------------------------------------------------------
+// Three states, never colour only: each has its own icon shape, theme colour and accessible label.
+export type Indicator = "verified" | "failed" | "unverified";
+export const INDICATORS: Record<Indicator, { icon: string; color: "success" | "danger" | "muted"; label: string }> = {
+  verified: { icon: "CircleCheck", color: "success", label: "Verified" },
+  failed: { icon: "CircleX", color: "danger", label: "Failed" },
+  unverified: { icon: "CircleHelp", color: "muted", label: "Cannot verify" },
+};
+// ok is verified, fail is failed; warn, unknown and anything else cannot be verified.
+export const indicatorOf = (status: CheckLike["status"] | undefined): Indicator => (status === "ok" ? "verified" : status === "fail" ? "failed" : "unverified");
+
+export const NOT_CHECKED = "Not checked yet: run Check cluster.";
+export type Requirement = { id: string; label: string; description: string; indicator: Indicator; detail: string };
+
+// One row per requirement, fed by the ids `checkCluster` returns (kubectl, cluster, rbac, volume, settings, secrets).
+// `checks` is null until the Cluster check has run. Rows only appear when they apply to the saved settings.
+export function requirementRows(saved: Configuration, checks: CheckLike[] | null): Requirement[] {
+  const find = (id: string) => checks?.find((c) => c.id === id);
+  // Why a row has no result: no check yet, or the check stopped before reaching it.
+  const missing = (): string =>
+    !checks ? NOT_CHECKED : find("kubectl")?.status === "fail" ? "Cannot verify: kubectl is not available." : find("cluster")?.status === "fail" ? "Cannot verify: the cluster is unreachable." : NOT_CHECKED;
+  const row = (id: string, label: string, description: string): Requirement => {
+    const c = find(id);
+    return { id, label, description, indicator: indicatorOf(c?.status), detail: c ? c.detail || "" : missing() };
+  };
+  const rows: Requirement[] = [
+    {
+      id: "paseo",
+      label: `Paseo ${MIN_PASEO_VERSION} or later`,
+      description: "The minimum host version, set in the plugin manifest.",
+      indicator: "verified",
+      // Paseo checks the manifest's requirement before loading the plugin (daemon and app), so a rendered screen means it is met.
+      detail: "Paseo enforces this when it loads the plugin: this screen is shown, so it is met.",
+    },
+    row("kubectl", "kubectl", "Installed on the daemon host."),
+    row("cluster", "Cluster and namespace", "The cluster answers kubectl and the sandbox namespace is reachable."),
+    row("rbac", "Cluster access (RBAC)", "The Role of config/plugin-rbac.yaml is bound to your identity."),
+    row("settings", "Sandbox settings", "Image, volume claim and paths are set."),
+  ];
+  if (modesInUse(saved).has("shared")) {
+    const volume = row("volume", "Worktree volume", "The worktree volume claim exists in the sandbox namespace.");
+    // The check only looks for a claim that is set.
+    if (!find("volume") && checks && !saved.worktree.claimName) volume.detail = "Set the worktree volume claim in Settings.";
+    rows.splice(4, 0, volume);
+  }
+  if (saved.ssh.keyFile) rows.push(row("secrets", "Secret rights (Git over SSH)", "Rights on the SSH Secret the plugin manages."));
+  return rows;
 }
 
 type Entry = Configuration["workspaces"][number];

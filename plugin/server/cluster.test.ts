@@ -56,3 +56,18 @@ test("connection maps kubectl failures without leaking stderr", async () => {
     return true;
   });
 });
+
+test("Secret rights are reported apart from pod rights, only with Git over SSH", async () => {
+  const ssh = settingsSchema.parse({ image: "i", worktree: { claimName: "wt", basePath: "/wt" }, ssh: { keyFile: "/k", knownHostsFile: "/h" } });
+  const deny = (what: string): Kubectl => async (a) => {
+    if (a[0] === "auth" && a.slice(2).join(" ") === what) throw new KubernetesError("unavailable", "no\n");
+    return a[0] === "auth" ? "yes" : "x";
+  };
+  const secrets = await checkCluster(ssh, deny("create secrets"), version);
+  assert.equal(secrets.checks.find((x) => x.id === "secrets")!.status, "fail");
+  assert.equal(secrets.checks.find((x) => x.id === "rbac")!.status, "ok");
+  const pods = await checkCluster(ssh, deny("get pods"), version);
+  assert.equal(pods.checks.find((x) => x.id === "rbac")!.status, "fail");
+  assert.equal(pods.checks.find((x) => x.id === "secrets")!.status, "ok");
+  assert.ok(!(await checkCluster(c, deny("x"), version)).checks.some((x) => x.id === "secrets"));
+});

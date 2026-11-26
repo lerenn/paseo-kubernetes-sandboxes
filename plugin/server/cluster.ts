@@ -42,6 +42,7 @@ export async function checkCluster(
     }
   }
   const missing: string[] = [];
+  const missingSecrets: string[] = [];
   let reachable = true;
   // Secret rights are only needed with Git over SSH. `auth can-i` answers yes/no; no Secret is ever read.
   const rights: [string, string][] = sshConfigured(c)
@@ -50,10 +51,11 @@ export async function checkCluster(
   for (const [verb, resource] of rights) {
     try {
       const answer = (await run(["auth", "can-i", verb, resource])).trim();
-      if (answer !== "yes") missing.push(`${verb} ${resource}`);
+      if (answer !== "yes") (resource.startsWith("secrets") ? missingSecrets : missing).push(`${verb} ${resource}`);
     } catch (e) {
       // `auth can-i` prints "no" and exits non-zero when access is denied.
-      if (e instanceof KubernetesError && (e.stdout.trim() === "no" || e.reason === "forbidden")) missing.push(`${verb} ${resource}`);
+      if (e instanceof KubernetesError && (e.stdout.trim() === "no" || e.reason === "forbidden"))
+        (resource.startsWith("secrets") ? missingSecrets : missing).push(`${verb} ${resource}`);
       else reachable = false;
     }
   }
@@ -67,6 +69,13 @@ export async function checkCluster(
       missing.length
         ? { id: "rbac", label: "RBAC", status: "fail", detail: `Missing: ${missing.join(", ")}. Apply config/plugin-rbac.yaml and bind it to your identity.` }
         : { id: "rbac", label: "RBAC", status: "ok", detail: "The Role grants everything the plugin needs." },
+    );
+  // Same `auth can-i` answers as above, reported on their own so the screen can tell pod rights from Secret rights.
+  if (reachable && sshConfigured(c))
+    checks.push(
+      missingSecrets.length
+        ? { id: "secrets", label: "Secret rights (Git over SSH)", status: "fail", detail: `Missing: ${missingSecrets.join(", ")}. Apply config/plugin-rbac.yaml and bind it to your identity.` }
+        : { id: "secrets", label: "Secret rights (Git over SSH)", status: "ok", detail: `The Role grants the rights on the ${SSH_SECRET_NAME} Secret.` },
     );
   const problem = configError(c);
   if (c.worktree.claimName && reachable) {

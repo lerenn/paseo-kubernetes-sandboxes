@@ -4,8 +4,8 @@ import { z } from "zod";
 import { Badge, Button, Card, Choice, Disclosure, Field, JsonField, type Theme } from "./components.js";
 import type { clusterCheck, podsList, sshInfo, workspacesList } from "../shared/contracts.js";
 import type { Configuration } from "../shared/settings.js";
-import { MIN_PASEO_VERSION, modeOf, podOverridesSchema, sidecarNamesOf, sidecarProblems, sidecarSchema, type Mode } from "../shared/settings.js";
-import { age, phaseTone, plural, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar, type Tone } from "./view.js";
+import { modeOf, podOverridesSchema, sidecarNamesOf, sidecarProblems, sidecarSchema, type Mode } from "../shared/settings.js";
+import { INDICATORS, age, phaseTone, plural, requirementRows, resourceIssue, setWorkspaceMode, setupSteps, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
 
 export type Body = { color: string; fontSize: number; lineHeight: number };
 export type SshStatus = z.output<typeof sshInfo>;
@@ -15,7 +15,6 @@ export type WorkspaceRows = z.output<typeof workspacesList.output>["workspaces"]
 export type TabId = "overview" | "cluster" | "workspaces" | "pods" | "settings";
 
 const DOCS = "https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md";
-const checkTone = (s: string): Tone => (s === "ok" ? "success" : s === "warn" ? "warning" : "muted");
 const MODE_LABEL: Record<Mode, string> = { shared: "Shared worktree", clone: "Pod-local clone" };
 const mono = { fontFamily: "monospace" } as const;
 
@@ -43,13 +42,7 @@ type Common = { theme: Theme; text: Body; busy: boolean; saved: boolean; ready: 
 export function OverviewTab(p: Common & { saved_: Configuration; status: ClusterStatus | null; pods: PodRows | null; go(tab: TabId): void }) {
   const { theme, text } = p;
   const steps = setupSteps(p.saved_, p.status?.checks ?? null);
-  const kubectl = p.status?.checks.find((c) => c.id === "kubectl");
-  const rbac = p.status?.checks.find((c) => c.id === "rbac");
-  const requirements: { label: string; tone: Tone; value: string }[] = [
-    { label: `Paseo ${MIN_PASEO_VERSION} or later`, tone: "muted", value: "Enforced by the plugin manifest: Paseo refuses to load the plugin on an older host." },
-    { label: "kubectl", tone: checkTone(kubectl?.status ?? "unknown"), value: kubectl?.detail ?? "Run the cluster check." },
-    { label: "Cluster access (RBAC)", tone: checkTone(rbac?.status ?? "unknown"), value: rbac?.detail ?? "Run the cluster check." },
-  ];
+  const requirements = requirementRows(p.saved_, p.status?.checks ?? null);
   return (
     <>
       <Card theme={theme} title="Setup" icon="ListChecks" description="Three steps before a workspace can run in a pod.">
@@ -74,15 +67,23 @@ export function OverviewTab(p: Common & { saved_: Configuration; status: Cluster
         </Card>
       )}
       <Card theme={theme} title="Requirements" icon="ClipboardCheck" description="What the daemon host needs.">
-        {requirements.map((r) => (
-          <View key={r.label} style={{ flexDirection: "row", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <View style={{ minWidth: 180 }}>
-              <Badge theme={theme} label={r.label} tone={r.tone} />
+        {requirements.map((r) => {
+          const ind = INDICATORS[r.indicator];
+          const color = ind.color === "success" ? theme.colors.statusSuccess : ind.color === "danger" ? theme.colors.statusDanger : theme.colors.foregroundMuted;
+          return (
+            <View key={r.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 4 }}>
+              <View accessible accessibilityRole="image" accessibilityLabel={ind.label} style={{ paddingTop: 1 }}>
+                <Icon name={ind.icon} size={18} color={color} />
+              </View>
+              <View style={{ flex: 1, minWidth: 180, gap: 2 }}>
+                <Text style={{ ...text, color: theme.colors.foreground, fontWeight: "600" }}>{r.label}</Text>
+                <Text style={text}>{r.description}</Text>
+                <Text style={{ ...text, color: r.indicator === "failed" ? theme.colors.statusDanger : theme.colors.foregroundMuted }}>{r.detail}</Text>
+              </View>
             </View>
-            <Text style={{ ...text, flex: 1, minWidth: 200 }}>{r.value}</Text>
-          </View>
-        ))}
-        <Text style={text}>Shared worktree mode needs the daemon's worktree volume (and the repositories' .git directories) mountable by the pods. Pod-local clone mode needs git credentials in a Secret for private repositories.</Text>
+          );
+        })}
+        <Text style={text}>Shared worktree mode needs the daemon's worktree volume (and the repositories' .git directories) mountable by the pods. For private repositories, use Git over SSH (Cluster tab), which the plugin keeps in one managed Secret, or a Git Secret you create yourself (Settings) for HTTPS or other git configuration.</Text>
       </Card>
       <Card
         theme={theme}

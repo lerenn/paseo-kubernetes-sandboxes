@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { settingsSchema } from "../shared/settings.js";
-import { age, phaseTone, resourceIssue, setWorkspaceMode, setWorkspaceSidecars, setupSteps, settingsProblems, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
+import { INDICATORS, NOT_CHECKED, age, indicatorOf, requirementRows, phaseTone, resourceIssue, setWorkspaceMode, setWorkspaceSidecars, setupSteps, settingsProblems, toggleWorkspace, toggleWorkspaceSidecar } from "./view.js";
 
 test("age formats elapsed time", () => {
   const now = Date.parse("2026-01-02T00:00:00Z");
@@ -56,4 +56,63 @@ test("workspace sidecar choices keep the mode and return to the defaults", () =>
   assert.deepEqual(setWorkspaceMode([{ id: "a", mode: "clone", sidecars: [] }], "a", undefined), [{ id: "a", sidecars: [] }]);
   assert.deepEqual(toggleWorkspaceSidecar([{ id: "a" }], "a", ["x"], "y", true), [{ id: "a", sidecars: ["x", "y"] }]);
   assert.deepEqual(toggleWorkspaceSidecar([{ id: "a" }], "a", ["x"], "x", false), [{ id: "a", sidecars: [] }]);
+});
+
+test("indicatorOf maps statuses: ok green, fail red, warn/unknown/none grey", () => {
+  assert.equal(indicatorOf("ok"), "verified");
+  assert.equal(indicatorOf("fail"), "failed");
+  assert.equal(indicatorOf("warn"), "unverified");
+  assert.equal(indicatorOf("unknown"), "unverified");
+  assert.equal(indicatorOf(undefined), "unverified");
+  const shapes = new Set(Object.values(INDICATORS).map((i) => i.icon));
+  assert.equal(shapes.size, 3);
+  assert.deepEqual(Object.values(INDICATORS).map((i) => i.label), ["Verified", "Failed", "Cannot verify"]);
+});
+
+const shared = settingsSchema.parse({ image: "i", worktree: { claimName: "c", basePath: "/w" } });
+const byId = (rows: ReturnType<typeof requirementRows>) => Object.fromEntries(rows.map((r) => [r.id, r]));
+
+test("requirements before any check: Paseo verified, the rest not checked yet", () => {
+  const rows = byId(requirementRows(shared, null));
+  assert.equal(rows.paseo.indicator, "verified");
+  for (const id of ["kubectl", "cluster", "rbac", "settings", "volume"]) {
+    assert.equal(rows[id].indicator, "unverified", id);
+    assert.equal(rows[id].detail, NOT_CHECKED, id);
+  }
+  assert.equal(rows.secrets, undefined);
+});
+
+test("requirements follow each check result", () => {
+  const rows = byId(
+    requirementRows(shared, [
+      { id: "kubectl", status: "ok", detail: "v1" },
+      { id: "cluster", status: "ok", detail: "ctx" },
+      { id: "rbac", status: "fail", detail: "Missing: create pods" },
+      { id: "volume", status: "warn", detail: "odd" },
+      { id: "settings", status: "unknown", detail: "" },
+    ]),
+  );
+  assert.deepEqual([rows.kubectl, rows.cluster, rows.rbac, rows.volume, rows.settings].map((r) => r.indicator), ["verified", "verified", "failed", "unverified", "unverified"]);
+  assert.equal(rows.rbac.detail, "Missing: create pods");
+  assert.equal(rows.volume.detail, "odd");
+});
+
+test("rows the check never reached explain why", () => {
+  const noKubectl = byId(requirementRows(shared, [{ id: "kubectl", status: "fail", detail: "gone" }]));
+  assert.equal(noKubectl.kubectl.indicator, "failed");
+  assert.match(noKubectl.rbac.detail, /kubectl is not available/);
+  const down = byId(requirementRows(shared, [{ id: "kubectl", status: "ok" }, { id: "cluster", status: "fail", detail: "x" }]));
+  assert.equal(down.rbac.indicator, "unverified");
+  assert.match(down.rbac.detail, /unreachable/);
+  const noClaim = byId(requirementRows(settingsSchema.parse({ image: "i" }), [{ id: "kubectl", status: "ok" }, { id: "cluster", status: "ok" }]));
+  assert.match(noClaim.volume.detail, /Set the worktree volume claim/);
+});
+
+test("volume and secret rows only appear when they apply", () => {
+  const clone = settingsSchema.parse({ image: "i", defaultMode: "clone", clone: { path: "/c" } });
+  assert.equal(byId(requirementRows(clone, null)).volume, undefined);
+  const ssh = settingsSchema.parse({ image: "i", worktree: { claimName: "c", basePath: "/w" }, ssh: { keyFile: "/k", knownHostsFile: "/h" } });
+  const rows = byId(requirementRows(ssh, [{ id: "secrets", status: "ok", detail: "yes" }]));
+  assert.equal(rows.secrets.indicator, "verified");
+  assert.equal(byId(requirementRows(ssh, null)).secrets.indicator, "unverified");
 });
