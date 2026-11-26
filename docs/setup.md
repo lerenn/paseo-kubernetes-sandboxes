@@ -11,8 +11,8 @@ commands.
 - Paseo **0.17.5 or later** on the daemon host. The plugin manifest enforces it. The plugin uses launch
   wraps (`wrap` in the `agent.open.before`, `terminal.create.before` and `command.run.before` hooks).
 - `kubectl` on the daemon host, authenticated to a cluster (Node 22+ only for plugin development).
-- A namespace, and the Role in [`config/plugin-rbac.yaml`](../config/plugin-rbac.yaml) bound to the identity
-  kubectl uses.
+- A namespace where the identity kubectl uses can manage pods, pods/exec, pods/log and persistent volume
+  claims (see [Cluster rights](#cluster-rights-only-if-your-identity-lacks-them)).
 - A container image with a shell, `git` and every program your agents and terminals run (the agent CLI,
   build tools). The plugin does not ship an image.
 - Shared worktree mode: a PersistentVolumeClaim holding the daemon's worktrees and repositories
@@ -22,13 +22,21 @@ commands.
 ## Install
 
 ```sh
+cd plugin && npm ci
+paseo plugin install "$PWD"
+```
+
+### Cluster rights (only if your identity lacks them)
+
+Needed only when **Check cluster** reports missing rights, for example not with cluster-admin or when a
+GitOps repository already applies the Role. The plugin cannot grant itself rights, and **Check cluster**
+only verifies them (read-only, `kubectl auth can-i`). A cluster admin runs:
+
+```sh
 kubectl create namespace paseo-sandboxes
 kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
 kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
   --role=paseo-sandboxes --user=<the identity kubectl uses>
-
-cd plugin && npm ci
-paseo plugin install "$PWD"
 ```
 
 ## Configure
@@ -102,7 +110,7 @@ asking you to delete the pod first (Pods tab). Delete clone pods only after push
 
 ## Pod lifecycle
 
-- Created lazily on the first wrapped launch, labelled `app.kubernetes.io/managed-by=paseo-kubernetes-sandboxes`,
+- Created lazily on the first wrapped launch, labelled `app.kubernetes.io/managed-by=paseo-sandboxes`,
   one per workspace id, shared by every conversation, terminal and command of that workspace.
 - Deleted when its workspace is archived (`workspace.archive.after`), when it has run nothing for the idle
   timeout, or from the **Pods** tab. Pods and clone volumes of workspaces that no longer exist are removed

@@ -20,7 +20,7 @@ rules:
     resources: [pods/log]
     verbs: [get]
   # Cluster tab checks the shared worktree claim; clone mode with a per-sandbox volume creates and
-  # deletes its own claims (labelled managed-by=paseo-kubernetes-sandboxes).
+  # deletes its own claims (labelled managed-by=paseo-sandboxes).
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
     verbs: [get, list, create, delete]
