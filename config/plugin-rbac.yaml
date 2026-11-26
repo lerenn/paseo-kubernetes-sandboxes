@@ -1,14 +1,14 @@
 # Bind this Role to the identity kubectl uses on the Paseo daemon host (user or ServiceAccount).
 # Apply it in the sandbox namespace, for example:
-#   kubectl create namespace paseo-sandbox
-#   kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
-#   kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandbox \
+#   kubectl create namespace paseo-sandboxes
+#   kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
+#   kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandboxes \
 #     --role=paseo-kubernetes-sandboxes --user=<your-user>
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: paseo-kubernetes-sandboxes
-  namespace: paseo-sandbox
+  namespace: paseo-sandboxes
 rules:
   - apiGroups: ['']
     resources: [pods]

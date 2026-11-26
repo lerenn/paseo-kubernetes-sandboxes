@@ -14,9 +14,9 @@
 <h1>Getting started</h1><p class="lead">Apply a Role, install the plugin, then opt workspaces in.</p>
 <h2>Requirements</h2><ul><li>Paseo 0.17.5 or later on the daemon host.</li><li><code>kubectl</code> on the daemon host, authenticated to a cluster.</li><li>A namespace with the Role from <code>config/plugin-rbac.yaml</code> bound to your kubectl identity.</li><li>A PersistentVolumeClaim holding the daemon's worktrees, mountable by the pods.</li><li>An image with a shell and the programs your agents need.</li></ul>
 <h2>Install</h2>
-<pre><code>kubectl create namespace paseo-sandbox
-kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandbox \
+<pre><code>kubectl create namespace paseo-sandboxes
+kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
+kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandboxes \
   --role=paseo-kubernetes-sandboxes --user=&lt;identity&gt;
 
 cd plugin &amp;&amp; npm ci

@@ -4,7 +4,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: paseo-worktrees
-  namespace: paseo-sandbox
+  namespace: paseo-sandboxes
 spec:
   accessModes: [ReadWriteMany]
   resources:

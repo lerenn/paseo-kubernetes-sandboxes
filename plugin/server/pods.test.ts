@@ -94,10 +94,115 @@ test("clone mode with a per-sandbox volume uses a PVC named after the pod", () =
   assert.equal(pvc.spec.storageClassName, "fast");
 });
 
-test("dind adds a privileged sidecar only when enabled", () => {
-  const pod = buildPod(config({ dind: true }), "w1", "shared", repo);
+const dockerSidecar = {
+  name: "docker",
+  image: "docker:27-dind",
+  env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
+  privileged: true,
+  mainEnv: [{ name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" }],
+  readinessProbe: { exec: ["docker", "info"] },
+  stateVolume: { path: "/var/lib/docker", sizeLimit: "20Gi" },
+  resources: { cpuLimit: "2", memoryLimit: "4Gi", ephemeralStorageLimit: "25Gi" },
+};
+const withDocker = (over: Record<string, unknown> = {}) => config({ sidecars: [dockerSidecar as any], defaultSidecars: ["docker"], ...over } as any);
+
+test("without sidecars the pod has only main and no extra spec fields", () => {
+  const pod = buildPod(config(), "w1", "shared", repo) as any;
+  assert.deepEqual(pod.spec.containers.map((c: any) => c.name), ["main"]);
+  assert.deepEqual(pod.spec.volumes.map((v: any) => v.name), ["worktree", "repo-git"]);
+  for (const k of ["runtimeClassName", "tolerations", "nodeSelector", "priorityClassName", "imagePullSecrets"]) assert.equal(k in pod.spec, false);
+  assert.equal(pod.spec.containers[0].env.some((e: any) => e.name === "DOCKER_HOST"), false);
+});
+
+test("an old saved config with dind still parses and the key is ignored", () => {
+  const c = config({ dind: true } as any);
+  assert.equal("dind" in c, false);
+  assert.equal((buildPod(c, "w1", "shared", repo) as any).spec.containers.length, 1);
+  assert.equal(c.namespace, "paseo-sandboxes");
+});
+
+test("a sidecar gets main's workspace mounts, its env on main only, privileged, probe and state volume (shared)", () => {
+  const pod = buildPod(withDocker(), "w1", "shared", repo) as any;
+  const [main, side] = pod.spec.containers;
   assert.equal(pod.spec.containers.length, 2);
-  assert.equal((pod.spec.containers[1] as any).securityContext.privileged, true);
+  assert.deepEqual(side.volumeMounts.slice(0, 2), main.volumeMounts);
+  assert.deepEqual(side.volumeMounts[2], { name: "state-docker", mountPath: "/var/lib/docker" });
+  assert.deepEqual(main.env.filter((e: any) => e.name === "DOCKER_HOST"), [{ name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" }]);
+  assert.equal(side.env.some((e: any) => e.name === "DOCKER_HOST"), false);
+  assert.equal(side.securityContext.privileged, true);
+  assert.deepEqual(side.readinessProbe.exec, { command: ["docker", "info"] });
+  assert.deepEqual(pod.spec.volumes.at(-1), { name: "state-docker", emptyDir: { sizeLimit: "20Gi" } });
+  assert.deepEqual(side.resources, { limits: { cpu: "2", memory: "4Gi", "ephemeral-storage": "25Gi" } });
+  assert.equal(side.securityContext === undefined, false);
+});
+
+test("clone mode: the sidecar shares the clone volume and never the git secret", () => {
+  const c = withDocker({ clone: { gitSecret: "gs" } });
+  const pod = buildPod(c, "w1", "clone", repo) as any;
+  const [main, side] = pod.spec.containers;
+  assert.ok(main.volumeMounts.some((m: any) => m.name === "git"));
+  assert.deepEqual(side.volumeMounts.filter((m: any) => m.name !== "state-docker"), [{ name: "clone", mountPath: "/workspace" }]);
+  assert.equal(JSON.stringify(side).includes("sandbox-git"), false);
+});
+
+test("a generic sidecar is unprivileged by default and can skip the workspace mounts", () => {
+  const c = config({ sidecars: [{ name: "cache", image: "redis:7", mountWorkspace: false, readinessProbe: { tcpPort: 6379 } }] as any, defaultSidecars: ["cache"] });
+  const side = (buildPod(c, "w1", "shared", repo) as any).spec.containers[1];
+  assert.equal(side.securityContext, undefined);
+  assert.equal(side.volumeMounts, undefined);
+  assert.deepEqual(side.readinessProbe.tcpSocket, { port: 6379 });
+});
+
+test("a workspace's sidecars override the defaults both ways", () => {
+  const off = withDocker({ workspaces: [{ id: "w1", sidecars: [] }] });
+  assert.equal((buildPod(off, "w1", "shared", repo) as any).spec.containers.length, 1);
+  const on = config({ sidecars: [dockerSidecar as any], defaultSidecars: [], workspaces: [{ id: "w1", sidecars: ["docker"] }] } as any);
+  assert.equal((buildPod(on, "w1", "shared", repo) as any).spec.containers.length, 2);
+  assert.equal((buildPod(on, "other", "shared", repo) as any).spec.containers.length, 1);
+});
+
+test("pod overrides land in the pod spec", () => {
+  const c = config({
+    podOverrides: { runtimeClassName: "gvisor", priorityClassName: "low", nodeSelector: { pool: "sandbox" }, tolerations: [{ key: "k", operator: "Exists", effect: "NoSchedule" }], imagePullSecrets: [{ name: "reg" }] },
+  } as any);
+  const spec = (buildPod(c, "w1", "shared", repo) as any).spec;
+  assert.equal(spec.runtimeClassName, "gvisor");
+  assert.equal(spec.priorityClassName, "low");
+  assert.deepEqual(spec.nodeSelector, { pool: "sandbox" });
+  assert.deepEqual(spec.tolerations, [{ key: "k", operator: "Exists", effect: "NoSchedule" }]);
+  assert.deepEqual(spec.imagePullSecrets, [{ name: "reg" }]);
+});
+
+test("sidecar and override validation", () => {
+  const bad = (over: Record<string, unknown>) => assert.equal(settingsSchema.safeParse({ image: "i", ...over }).success, false);
+  const sc = (o: Record<string, unknown> = {}) => ({ name: "a", image: "x", ...o });
+  assert.equal(settingsSchema.safeParse({ image: "i", sidecars: [sc()] }).success, true);
+  for (const name of ["main", "clone", "worktree", "repo-git", "git", "Bad_Name", ""]) bad({ sidecars: [sc({ name })] });
+  bad({ sidecars: [sc(), sc()] });
+  bad({ sidecars: [sc()], defaultSidecars: ["nope"] });
+  bad({ sidecars: [sc()], workspaces: [{ id: "w", sidecars: ["nope"] }] });
+  bad({ sidecars: [sc({ resources: { cpuLimit: "lots" } })] });
+  bad({ sidecars: [sc({ stateVolume: { path: "rel" } })] });
+  bad({ sidecars: [sc({ readinessProbe: {} })] });
+  bad({ sidecars: [sc({ readinessProbe: { exec: ["x"], tcpPort: 1 } })] });
+  bad({ sidecars: [sc({ env: Array.from({ length: 33 }, (_, i) => ({ name: `E${i}`, value: "" })) })] });
+  bad({ sidecars: Array.from({ length: 9 }, (_, i) => sc({ name: `s${i}` })) });
+  bad({ podOverrides: { tolerations: [{ key: "k", bogus: 1 }] } });
+  bad({ podOverrides: { tolerations: [{ operator: "Maybe" }] } });
+  bad({ podOverrides: { runtimeClassName: "Bad Name" } });
+  // Fields outside the allow-list are dropped, not merged.
+  const parsed = config({ podOverrides: { hostNetwork: true, serviceAccountName: "x" } } as any);
+  assert.equal("hostNetwork" in parsed.podOverrides, false);
+  assert.equal("hostNetwork" in (buildPod(parsed, "w1", "shared", repo) as any).spec, false);
+});
+
+test("pod info lists sidecar readiness separately from main", () => {
+  const p = JSON.parse(podJson({ status: { phase: "Running", containerStatuses: [{ name: "main", ready: true }, { name: "docker", ready: false }] } }));
+  const { run } = fake((a) => (a[0] === "get" ? JSON.stringify({ items: [p] }) : ""));
+  return listPods(run).then((pods) => {
+    assert.equal(pods[0].ready, true);
+    assert.deepEqual(pods[0].sidecars, [{ name: "docker", ready: false }]);
+  });
 });
 
 test("podCwd maps launches into the clone and keeps daemon paths in shared mode", () => {

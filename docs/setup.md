@@ -22,9 +22,9 @@ commands.
 ## Install
 
 ```sh
-kubectl create namespace paseo-sandbox
-kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandbox \
+kubectl create namespace paseo-sandboxes
+kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
+kubectl create rolebinding paseo-kubernetes-sandboxes -n paseo-sandboxes \
   --role=paseo-kubernetes-sandboxes --user=<the identity kubectl uses>
 
 cd plugin && npm ci
@@ -36,7 +36,7 @@ paseo plugin install "$PWD"
 Open **Kubernetes Sandbox** in the Paseo sidebar.
 
 1. **Settings**: image, CPU and memory, the default storage mode and its settings (below), run-as user,
-   idle timeout, optional environment Secret, optional Docker-in-Docker sidecar.
+   idle timeout, optional environment Secret, optional sidecars and pod overrides (see Sidecars).
 2. **Cluster**: context and namespace, then **Check cluster** (kubectl, access, RBAC, volume claim).
 3. **Workspaces**: tick the workspaces that run in a pod, pick a storage mode for each (or keep the
    default), then **Save changes**. The mode of each workspace shows on the Overview and Pods tabs.
@@ -108,6 +108,74 @@ asking you to delete the pod first (Pods tab). Delete clone pods only after push
   timeout, or from the **Pods** tab. Pods and clone volumes of workspaces that no longer exist are removed
   by the first sweep after the plugin starts.
 - Changing settings affects pods created afterwards, not existing ones: delete a pod to rebuild it.
+
+## Sidecars
+
+A sidecar is an extra container in each sandbox pod. The mechanism is generic: you define named templates
+(**Sidecar templates**, JSON, in Settings), choose which are on by default (`defaultSidecars`), and
+override the choice per workspace (Workspaces tab, `workspaces[].sidecars`; `[]` means none). Docker is
+only an example configuration, not a built-in preset. The old `dind` setting no longer exists; a saved
+config that still has it loads and the key is ignored.
+
+Template fields: `name` (DNS label, unique, not `main`, `clone`, `worktree`, `repo-git` or `git`),
+`image`, `command`, `args`, `env`, `privileged` (explicit, default `false`), `resources`
+(`cpuRequest`, `cpuLimit`, `memoryRequest`, `memoryLimit`, `ephemeralStorageRequest`,
+`ephemeralStorageLimit`), `mountWorkspace` (default `true`), `readinessProbe` (either `exec`, a command, or
+`tcpPort`, plus timings), `stateVolume` (`path` and `sizeLimit`, an `emptyDir` mounted in the sidecar only,
+default limit `20Gi`) and `mainEnv` (environment added to the main container while the sidecar is on).
+
+- Sidecars are regular containers, not native sidecars. Pod readiness waits for every readiness probe, so
+  the first launch waits for them. The Pods tab shows the readiness of each sidecar.
+- With `mountWorkspace`, the sidecar gets the same volume mounts as the main container at the same
+  absolute paths (shared and clone mode). It never gets the git Secret.
+- A sidecar does not get the plugin's run-as-user setting: it runs as its image does.
+- **Pod overrides** apply to every sandbox pod and are limited to `runtimeClassName`, `tolerations`,
+  `nodeSelector`, `priorityClassName` and `imagePullSecrets`. Other keys are dropped. There is no raw
+  merge and no per-workspace override.
+- Changes apply to pods created afterwards; delete a pod to rebuild it.
+
+### Example: docker
+
+```json
+{
+  "sidecars": [{
+    "name": "docker",
+    "image": "docker:27-dind",
+    "privileged": true,
+    "env": [{ "name": "DOCKER_TLS_CERTDIR", "value": "" }],
+    "mainEnv": [{ "name": "DOCKER_HOST", "value": "tcp://127.0.0.1:2375" }],
+    "readinessProbe": { "exec": ["docker", "info"], "initialDelaySeconds": 2, "periodSeconds": 2, "failureThreshold": 30 },
+    "stateVolume": { "path": "/var/lib/docker", "sizeLimit": "20Gi" },
+    "resources": { "cpuRequest": "100m", "memoryRequest": "256Mi", "cpuLimit": "2", "memoryLimit": "4Gi" }
+  }],
+  "defaultSidecars": []
+}
+```
+
+Then enable `docker` for the workspaces that need it (Workspaces tab), or put it in `defaultSidecars`.
+
+Requirements:
+
+- The **main image needs a docker CLI**. The sidecar provides only the daemon, reached over
+  `tcp://127.0.0.1:2375` (the pod shares a network namespace).
+- The namespace's Pod Security level must allow **privileged** pods, otherwise the pod is rejected at creation.
+
+**Isolation.** A privileged sidecar is root-equivalent on the node: a container escape from it is a node
+compromise. This is weaker isolation than the base pod. The daemon on `127.0.0.1:2375` has no
+authentication: any process in the pod can use it. The pod's processes share one PID namespace, and with
+`mountWorkspace` the sidecar can write the repository's `.git` directory (including hooks) in shared mode.
+Do not treat this setup as a security boundary.
+
+**Not tested** (nothing below has been run in a real cluster; the unit tests only check the generated pod):
+
+- Docker bind mounts (`docker run -v "$PWD":/w`) of paths that come from `subPath` volume mounts.
+- File ownership of files written by containers started through the sidecar.
+- Behaviour of the `docker:dind` entrypoint in a shared PID namespace.
+- Whether the 25-second launch timeout is too short when the sidecar image is pulled cold (the launch then
+  fails with "still starting"; the pod continues to start).
+- Eviction when the state volume or ephemeral storage limit is exceeded.
+- Whether a namespace that denies privileged pods gives a readable error.
+- Nested resource limits: the sidecar's limits apply to the sidecar container, not per docker container.
 
 ## Secrets
 

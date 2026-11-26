@@ -29,7 +29,7 @@ stays on the main daemon; there is no daemon, gateway or operator in the pod. On
 ## Install and use
 
 ```sh
-kubectl apply -n paseo-sandbox -f config/plugin-rbac.yaml
+kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
 cd plugin && npm ci && paseo plugin install "$PWD"
 ```
 

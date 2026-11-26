@@ -1,4 +1,4 @@
-import { modeOf, type Configuration, type Mode } from "../shared/settings.js";
+import { modeOf, sidecarProblems, sidecarsOf, type Configuration, type Mode, type Sidecar } from "../shared/settings.js";
 import { subPathFor, type RepoInfo } from "./repo.js";
 import {
   ANNOTATION_MODE,
@@ -22,12 +22,14 @@ export type PodInfo = {
   createdAt: string;
   lastUsed: string | null;
   mode: Mode;
+  // Readiness of the other containers of the pod (the sidecars).
+  sidecars: { name: string; ready: boolean }[];
 };
-
-export const DIND_IMAGE = "docker:27-dind";
 
 export function configError(c: Configuration, mode: Mode = c.defaultMode): string | null {
   if (!c.image) return "Set the sandbox image in Settings.";
+  const sidecar = sidecarProblems(c);
+  if (sidecar) return sidecar;
   if (mode === "shared") {
     if (!c.worktree.claimName) return "Set the worktree volume claim in Settings.";
     if (!c.worktree.basePath.startsWith("/")) return "Set the worktree base path (absolute) in Settings.";
@@ -40,6 +42,50 @@ export function podCwd(c: Configuration, mode: Mode, repo: RepoInfo, daemonCwd: 
   if (mode === "shared") return daemonCwd;
   const rel = daemonCwd === repo.root ? "" : daemonCwd.startsWith(repo.root + "/") ? daemonCwd.slice(repo.root.length + 1) : "";
   return rel ? `${c.clone.path.replace(/\/+$/, "")}/${rel}` : c.clone.path;
+}
+
+const quantities = (r: Sidecar["resources"], kind: "Request" | "Limit") => {
+  const out: Record<string, string> = {};
+  if (r[`cpu${kind}`]) out.cpu = r[`cpu${kind}`]!;
+  if (r[`memory${kind}`]) out.memory = r[`memory${kind}`]!;
+  if (r[`ephemeralStorage${kind}`]) out["ephemeral-storage"] = r[`ephemeralStorage${kind}`]!;
+  return out;
+};
+
+// A regular container (not a native sidecar) so that the pod's Ready condition waits for its probe.
+// It gets the main container's workspace mounts at the same absolute paths, never the git Secret.
+function sidecarContainer(s: Sidecar, mounts: Record<string, unknown>[], volumes: Record<string, unknown>[]) {
+  const volumeMounts = s.mountWorkspace ? mounts.filter((m) => m.name !== "git").map((m) => ({ ...m })) : [];
+  if (s.stateVolume) {
+    volumes.push({ name: `state-${s.name}`, emptyDir: { sizeLimit: s.stateVolume.sizeLimit } });
+    volumeMounts.push({ name: `state-${s.name}`, mountPath: s.stateVolume.path });
+  }
+  const requests = quantities(s.resources, "Request");
+  const limits = quantities(s.resources, "Limit");
+  const p = s.readinessProbe;
+  return {
+    name: s.name,
+    image: s.image,
+    ...(s.command ? { command: s.command } : {}),
+    ...(s.args ? { args: s.args } : {}),
+    ...(s.env.length ? { env: s.env } : {}),
+    ...(s.privileged ? { securityContext: { privileged: true } } : {}),
+    ...(Object.keys(requests).length || Object.keys(limits).length
+      ? { resources: { ...(Object.keys(requests).length ? { requests } : {}), ...(Object.keys(limits).length ? { limits } : {}) } }
+      : {}),
+    ...(p
+      ? {
+          readinessProbe: {
+            ...(p.exec ? { exec: { command: p.exec } } : { tcpSocket: { port: p.tcpPort } }),
+            initialDelaySeconds: p.initialDelaySeconds,
+            periodSeconds: p.periodSeconds,
+            timeoutSeconds: p.timeoutSeconds,
+            failureThreshold: p.failureThreshold,
+          },
+        }
+      : {}),
+    ...(volumeMounts.length ? { volumeMounts } : {}),
+  };
 }
 
 export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo: RepoInfo) {
@@ -83,7 +129,12 @@ export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo
       volumeMounts: mounts,
     });
   }
-  if (c.dind) env.push({ name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" });
+  const sidecars = sidecarsOf(c, workspaceId);
+  const mainEnv = sidecars.flatMap((s) => s.mainEnv);
+  const mainEnvNames = new Set(mainEnv.map((e) => e.name));
+  const mainEnvFull = [...env.filter((e) => !mainEnvNames.has(e.name)), ...mainEnv];
+  const sidecarContainers = sidecars.map((s) => sidecarContainer(s, mounts, volumes));
+  const o = c.podOverrides;
 
   return {
     apiVersion: "v1",
@@ -99,6 +150,11 @@ export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo
       shareProcessNamespace: true,
       terminationGracePeriodSeconds: 5,
       automountServiceAccountToken: false,
+      ...(o.runtimeClassName ? { runtimeClassName: o.runtimeClassName } : {}),
+      ...(o.priorityClassName ? { priorityClassName: o.priorityClassName } : {}),
+      ...(o.tolerations.length ? { tolerations: o.tolerations } : {}),
+      ...(Object.keys(o.nodeSelector).length ? { nodeSelector: o.nodeSelector } : {}),
+      ...(o.imagePullSecrets.length ? { imagePullSecrets: o.imagePullSecrets } : {}),
       ...(initContainers.length ? { initContainers } : {}),
       containers: [
         {
@@ -107,16 +163,14 @@ export function buildPod(c: Configuration, workspaceId: string, mode: Mode, repo
           command: ["sh", "-c", `mkdir -p ${STATE_DIR}; while :; do sleep 3600 & wait $!; done`],
           workingDir: mode === "shared" ? repo.root : c.clone.path,
           ...(c.envSecret ? { envFrom: [{ secretRef: { name: c.envSecret } }] } : {}),
-          env,
+          env: mainEnvFull,
           resources: {
             requests: { cpu: r.cpuRequest, memory: r.memoryRequest },
             limits: { cpu: r.cpuLimit, memory: r.memoryLimit },
           },
           volumeMounts: mounts,
         },
-        ...(c.dind
-          ? [{ name: "dind", image: DIND_IMAGE, env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }], securityContext: { privileged: true } }]
-          : []),
+        ...sidecarContainers,
       ],
       volumes,
     },
@@ -155,6 +209,7 @@ function toInfo(p: PodJson): PodInfo {
     createdAt: p.metadata?.creationTimestamp ?? "",
     lastUsed: null,
     mode: p.metadata?.annotations?.[ANNOTATION_MODE] === "clone" ? "clone" : "shared",
+    sidecars: (p.status?.containerStatuses ?? []).filter((s) => s.name !== MAIN_CONTAINER).map((s) => ({ name: s.name, ready: s.ready })),
   };
 }
 
