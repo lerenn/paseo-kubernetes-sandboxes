@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { z } from "zod";
-import { sandboxProfile } from "../shared/contracts.js";
+import { endpointType, sandboxProfile } from "../shared/contracts.js";
 import type { Connection } from "../shared/settings.js";
 
 export class ControllerError extends Error {
@@ -76,7 +76,8 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
 
 const sandboxPath = (workspaceId: string) => `/v1/sandboxes/${encodeURIComponent(workspaceId)}`;
 
-export const health = (c: Connection) => call<{ ok: boolean }>(c, "GET", "/healthz");
+export const health = async (c: Connection) =>
+  z.object({ ok: z.literal(true), type: endpointType.default("controller") }).parse(await call(c, "GET", "/healthz"));
 export const profiles = async (c: Connection, timeoutMs?: number) =>
   z.object({ profiles: z.array(sandboxProfile) }).parse(await call(c, "GET", "/v1/profiles", undefined, timeoutMs)).profiles;
 export const getSandbox = async (c: Connection, workspaceId: string) =>

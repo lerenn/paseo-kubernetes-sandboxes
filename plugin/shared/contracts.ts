@@ -5,6 +5,9 @@ import { connectionSchema, settingsSchema } from "./settings.js";
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
 
+export const endpointType = z.enum(["controller", "gateway"]);
+export type EndpointType = z.infer<typeof endpointType>;
+
 const quantities = z.object({
   cpu: z.string().optional(),
   memory: z.string().optional(),
@@ -21,6 +24,7 @@ export const sandboxProfile = z.object({
     requests: quantities,
     limits: quantities,
   })).optional(),
+  controller: z.string().optional(),
 });
 export type SandboxProfile = z.infer<typeof sandboxProfile>;
 
@@ -28,7 +32,7 @@ export type SandboxProfile = z.infer<typeof sandboxProfile>;
 export const controllerCheck = defineRpc({
   name: "controller.check",
   input: connectionSchema,
-  output: z.object({ checks: z.array(check), profiles: z.array(sandboxProfile) }),
+  output: z.object({ checks: z.array(check), profiles: z.array(sandboxProfile), type: endpointType.optional() }),
 });
 
 export const sandboxState = z.enum(["running", "starting", "stopping", "failed", "absent", "unknown"]);

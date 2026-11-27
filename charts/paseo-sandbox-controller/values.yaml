@@ -23,3 +23,28 @@ resources:
     memory: 64Mi
   limits:
     memory: 256Mi
+
+controller:
+  enabled: true
+
+# Install in a separate release with controller.enabled=false to run only the gateway.
+gateway:
+  enabled: false
+  # Operator-managed Secret with tls.crt and tls.key for the gateway hostname.
+  tlsSecretName: ""
+  # Operator-managed Secret mounted at /credentials for backend token and CA files.
+  credentialsSecretName: ""
+  # Existing, dedicated PVC. Use ReadWriteOncePod and retain across deployment changes.
+  stateClaimName: ""
+  # backend ID -> {url: HTTPS origin, caFile: /credentials/<key> (optional)}
+  backends: {}
+  # public profile alias -> {backend: backend ID, profile: controller profile ID, privileged: boolean}
+  profiles: {}
+  # gateway principal -> {tokenSha256, profiles: [public aliases], backendTokenFiles: {backend ID: /credentials/<key>}}
+  principals: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

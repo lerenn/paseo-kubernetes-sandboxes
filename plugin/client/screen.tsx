@@ -15,7 +15,7 @@ const controllerIcon = "Server";
 const TABS = [
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
   { id: "profiles", label: "Profiles", icon: "Layers" },
-  { id: "connection", label: "Controllers", icon: controllerIcon },
+  { id: "connection", label: "Connections", icon: controllerIcon },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -26,7 +26,7 @@ const connectionFields = [
   { key: "name", label: "Connection name", placeholder: "Standard", help: undefined },
   {
     key: "controllerUrl",
-    label: "Controller URL",
+    label: "HTTPS URL",
     placeholder: "https://sandbox.example.internal",
     help: "Ask your administrator for the private HTTPS endpoint. The Paseo daemon must be able to reach it over HTTP/2. After entering the URL and file paths, select Save connection, then Check connection.",
   },
@@ -34,7 +34,7 @@ const connectionFields = [
     key: "tokenFile",
     label: "Token file on the daemon",
     placeholder: "/path/to/controller.token",
-    help: "Ask your administrator to issue a controller token and provide the absolute path to its file on the Paseo daemon. If the daemon runs in a container, use the path inside that container. From the daemon environment, run test -r /path/to/controller.token to check readability without printing the token.",
+    help: "Ask your administrator to issue an endpoint token and provide the absolute path to its file on the Paseo daemon. If the daemon runs in a container, use the path inside that container. From the daemon environment, run test -r /path/to/controller.token to check readability without printing the token.",
   },
   {
     key: "caFile",
@@ -55,15 +55,21 @@ const statusLabels = {
 
 type ControllerCheck = z.infer<typeof controllerCheck.output>;
 
+function typeLabel(type: ControllerCheck["type"]) {
+  if (type === "gateway") return "Gateway";
+  if (type === "controller") return "Controller";
+  return "Unknown";
+}
+
 function profileAvailability(connection: NamedConnection, result: ControllerCheck | null | undefined) {
-  if (!isConfigured(connection)) return "Set the controller URL and token file in Controllers.";
+  if (!isConfigured(connection)) return "Set the HTTPS URL and token file in Connections.";
   if (result === undefined) return "Checking for authorized profiles…";
   if (result === null) return "Profile discovery failed.";
   const reach = result.checks.find(({ id }) => id === "reach");
   const auth = result.checks.find(({ id }) => id === "auth");
-  if (reach?.status === "fail") return "Controller unreachable.";
+  if (reach?.status === "fail") return "Endpoint unreachable.";
   if (auth?.status === "fail") return auth.detail;
-  if (auth?.status !== "ok") return "Check the endpoint and credential files in Controllers.";
+  if (auth?.status !== "ok") return "Check the endpoint and credential files in Connections.";
   return result.profiles.length === 0 ? "No profiles authorized for this token." : null;
 }
 
@@ -251,18 +257,20 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
               value={config.requireSandboxProfile} disabled={busy || settings.status !== "ready"}
               onValueChange={(required) => void action(() => save({ ...config, requireSandboxProfile: required }))} />
           </Card>}
-          {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
+          {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Connections" description="Use the private endpoints and credential files provided by your administrator.">
             {config.connections.length > 0 && (
-              <View role="table" accessibilityLabel="Saved controller connections" style={tableFrame}>
+              <View role="table" accessibilityLabel="Saved sandbox connections" style={tableFrame}>
                 <View role="row" style={tableHeader}>
                   <Text role="columnheader" style={[text, connectionTable.name, table.heading]}>Name</Text>
                   <Text role="columnheader" style={[text, connectionTable.id, table.heading]}>ID</Text>
+                  <Text role="columnheader" style={[text, connectionTable.type, table.heading]}>Type</Text>
                   <Text role="columnheader" style={[text, connectionTable.actions, table.heading, connectionTable.actionsHeading]}>Actions</Text>
                 </View>
                 {config.connections.map((connection) => (
                   <View key={connection.id} role="row" style={tableRow}>
                     <Text role="cell" style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
                     <Text role="cell" style={[text, connectionTable.id]}>{connection.id}</Text>
+                    <Text role="cell" style={[text, connectionTable.type]}>{typeLabel(checks?.get(connection.id)?.type)}</Text>
                     <View role="cell" style={connectionTable.actions}>
                       <Button theme={theme} label="Edit" accessibilityLabel={`Edit ${connection.name}`} disabled={busy}
                         onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
@@ -322,6 +330,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     })} />
                   )}
                 </View>
+                {editorCheck?.type && <Text style={text}>Type · {typeLabel(editorCheck.type)}</Text>}
                 {editorCheck?.checks.map(({ id, label, status, detail }) => (
                   <View key={id} style={{ gap: 4 }}>
                     <Badge theme={theme} label={label + " · " + (status === "ok" ? "Verified" : status === "fail" ? "Failed" : "Skipped")}
@@ -333,8 +342,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             )}
           </Card>}
 
-          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each controller’s saved token. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
-            {config.connections.length === 0 && <Text style={text}>No controllers configured. Add a connection in Controllers.</Text>}
+          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each connection’s saved token. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
+            {config.connections.length === 0 && <Text style={text}>Add a connection to see its profiles.</Text>}
             {profileRows.length > 0 && (
               <View role="table" accessibilityLabel="Available profiles" style={tableFrame}>
                 <View role="row" style={[tableHeader, profileRow]}>
@@ -351,8 +360,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     <View role="cell" style={[profileTable.controller, profileTable.controllerCell]}>
                       <Icon name={controllerIcon} size={14} color={theme.colors.foregroundMuted} />
                       <View style={profileTable.controllerLabel}>
-                        <Text style={[text, { color: theme.colors.foreground }]}>{connection.name}</Text>
-                        <Text style={text}>{connection.id}</Text>
+                        <Text style={[text, { color: theme.colors.foreground }]}>{profile.controller ?? connection.name}</Text>
+                        <Text style={text}>{profile.controller ? `via ${connection.name} (${connection.id})` : connection.id}</Text>
                       </View>
                     </View>
                     <View role="cell" style={profileTable.privilege}>
@@ -373,7 +382,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             ))}
           </Card>}
 
-          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a controller connection and its sandbox profile for each workspace.">
+          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a connection and sandbox profile for each workspace.">
             <Button theme={theme} label="Refresh status" disabled={busy || settings.status !== "ready"}
               onPress={() => void action(async () => setRows((await list({})).workspaces))} />
             {rows?.length === 0 && <Text style={text}>No workspaces on this host.</Text>}
@@ -492,6 +501,7 @@ const table = StyleSheet.create({
 const connectionTable = StyleSheet.create({
   name: { flex: 3, minWidth: 0 },
   id: { flex: 2.5, minWidth: 0 },
+  type: { flex: 2.5, minWidth: 0 },
   actions: { width: 60, alignItems: "flex-end" },
   actionsHeading: { textAlign: "right" },
 });

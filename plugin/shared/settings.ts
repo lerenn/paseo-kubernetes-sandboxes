@@ -12,9 +12,9 @@ export function urlProblem(value: string): string | null {
   } catch {
     return "Enter a full URL such as https://sandbox-controller.example.internal.";
   }
-  if (url.protocol !== "https:") return "The controller URL must use https.";
+  if (url.protocol !== "https:") return "The connection URL must use https.";
   if (url.username || url.password) return "Use the token file for credentials.";
-  if (url.pathname !== "/" || url.search || url.hash) return "Enter the controller's HTTPS origin.";
+  if (url.pathname !== "/" || url.search || url.hash) return "Enter the endpoint's HTTPS origin.";
   return null;
 }
 
