@@ -27,7 +27,7 @@
     <h2 id="gateway-install">Required Gateway</h2>
     <p>Install a release with <code>installation.role: gateway</code>. Provide a serving TLS Secret, a retained ReadWriteOncePod claim, backend HTTPS origins and per-principal profile grants. Cert-manager provisions and renews private controller serving and Gateway client certificates across namespaces. Each controller verifies the Gateway identity and applies the mapped backend principal's grants.</p>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/gateway-values.example.yaml">Example Gateway values</a></p>
-    <p>For an existing direct installation, verify Gateway profiles and HTTP/2, stop old sandboxes, retire direct access and then migrate the saved assignments in the upgraded plugin.</p>
+    <p>For an existing direct installation, verify Gateway profiles and HTTP/2, stop old sandboxes and migrate the saved assignments in the upgraded plugin. Retire direct access after the cutover is verified.</p>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#upgrade-from-direct-connections">Staged upgrade procedure</a></p>
     <h2 id="connection">Gateway settings</h2>
     <p>Each Paseo daemon uses a single Gateway connection. Paths refer to files on the daemon host or inside its container.</p>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -8,6 +8,8 @@ import { request } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { createGateway } from "./gateway.mjs";
 import { createPolicy } from "./policy.mjs";
 
@@ -22,7 +24,7 @@ async function listen(server) {
   return `https://127.0.0.1:${server.address().port}`;
 }
 
-async function fixture(t) {
+async function fixture(t, { commandFixture = false } = {}) {
   const state = mkdtempSync(join(tmpdir(), "paseo-gateway-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   const openssl = (...args) => execFileSync("openssl", args, { cwd: state, stdio: "ignore" });
@@ -87,7 +89,16 @@ async function fixture(t) {
         res.once("close", () => onCancel?.());
         res.writeHead(200, { "content-type": "application/octet-stream" });
         res.flushHeaders();
-        req.pipe(res);
+        if (commandFixture) {
+          req.once("data", (start) => {
+            assert.equal(start[0], 0);
+            const args = JSON.parse(start.subarray(5, 5 + start.readUInt32BE(1)));
+            assert.deepEqual(args.command, ["fixture"]);
+            res.end(Buffer.from([1, 0, 0, 0, 2, 111, 107, 3, 0, 0, 0, 1, 0]));
+          });
+        } else {
+          req.pipe(res);
+        }
         return;
       }
       reply(req.method === "DELETE" ? 202 : 200, { sandbox: sandboxes.get(key) ?? null });
@@ -144,7 +155,7 @@ async function fixture(t) {
       files.set("/credentials/tls.key", material.key);
       files.set("/credentials/tls.crt", material.cert);
     },
-    rogue, renewed, legitimate, files, serverCert: tls.cert,
+    rogue, renewed, legitimate, files, serverCert: tls.cert, state,
     cancelled: () => new Promise((resolve) => { onCancel = resolve; }),
   };
 }
@@ -241,4 +252,16 @@ test("mTLS rejects unrelated identities and verifies the controller, with stable
   assert.equal((await call("GET", profilesPath, "A"))[0], 503);
   files.set("ca", ca);
   assert.equal((await call("GET", profilesPath, "A"))[0], 200);
+});
+
+test("the launcher verifies the Gateway and streams through the versioned HTTP/2 route", { timeout: 10000 }, async (t) => {
+  const { call, address, state } = await fixture(t, { commandFixture: true });
+  await call("PUT", path, "A", { profile: "standard" });
+  writeFileSync(join(state, "token"), token("A"));
+  const launcher = fileURLToPath(new URL("../plugin/launcher/sandbox-exec.mjs", import.meta.url));
+  const result = await promisify(execFile)(process.execPath, [
+    launcher, "--url", address(), "--token-file", join(state, "token"), "--ca-file", join(state, "ca.crt"),
+    "--workspace", "workspace/example", "--profile", "standard", "--privileged", "false", "--cwd", "/workspace", "--", "fixture",
+  ]);
+  assert.equal(result.stdout, "ok");
 });
