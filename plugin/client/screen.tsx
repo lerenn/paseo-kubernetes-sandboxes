@@ -132,7 +132,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
               <Pressable
                 key={t.id}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
+                aria-selected={active}
                 accessibilityLabel={t.label}
                 onPress={() => setTab(t.id)}
                 style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}

@@ -104,7 +104,7 @@ export function Field({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Help for ${label}`}
-            accessibilityState={{ expanded: helpOpen }}
+            aria-expanded={helpOpen}
             onPress={() => setHelpOpen(!helpOpen)}
             style={{ width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
           >
