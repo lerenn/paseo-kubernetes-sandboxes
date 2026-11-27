@@ -1,3 +1,6 @@
+{{- if hasKey .Values "releases" }}
+{{- fail "Select one release from the shared installation values with scripts/helm-installation before invoking Helm." }}
+{{- end }}
 {{- if not (has .Values.installation.role (list "gateway" "backend")) }}
 {{- fail "installation.role must be gateway or backend. Each installation requires a Gateway release." }}
 {{- end }}

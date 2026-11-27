@@ -54,12 +54,46 @@ jobs:
       - run: npm ci --ignore-scripts && npm test && node --check server.mjs
         working-directory: controller
       - uses: azure/setup-helm@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25', cache: false}
+      - run: go install github.com/mikefarah/yq/v4@v4.49.1
       - run: |
-          helm lint charts/paseo-sandbox-controller -f config/controller-values.example.yaml
-          helm template sandbox charts/paseo-sandbox-controller -f config/controller-values.example.yaml
-          helm template docker charts/paseo-sandbox-controller --namespace docker -f config/docker-values.example.yaml
-          helm lint charts/paseo-sandbox-controller -f config/gateway-values.example.yaml
-          helm template gateway charts/paseo-sandbox-controller -f config/gateway-values.example.yaml
+          chart=charts/paseo-sandbox-controller
+          values=config/installation-values.example.yaml
+          for role in gateway standard docker; do
+            scripts/helm-installation "$values" "$role" lint "$chart"
+            scripts/helm-installation "$values" "$role" template "$role" "$chart" \
+              --namespace "$role" > "$RUNNER_TEMP/$role-render.yaml"
+          done
+          rg -q 'kind: ClusterIssuer' "$RUNNER_TEMP/gateway-render.yaml"
+          rg -q 'REPLACE_WITH_GATEWAY_TOKEN_SHA256' "$RUNNER_TEMP/gateway-render.yaml"
+          rg -q 'ghcr.io/your-org/paseo-sandbox:stable' "$RUNNER_TEMP/standard-render.yaml"
+          rg -q 'ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable' "$RUNNER_TEMP/docker-render.yaml"
+          for role in standard docker; do
+            scripts/helm-installation "$values" "$role" > "$RUNNER_TEMP/$role-values.yaml"
+            if rg -q 'REPLACE_WITH_GATEWAY_TOKEN_SHA256|sandbox-gateway-tls|^kind: ClusterIssuer' \
+              "$RUNNER_TEMP/$role-values.yaml" "$RUNNER_TEMP/$role-render.yaml"; then
+              exit 1
+            fi
+          done
+          if rg -q 'paseo-sandbox-with-docker-cli' "$RUNNER_TEMP/standard-values.yaml" "$RUNNER_TEMP/standard-render.yaml" ||
+             rg -q 'paseo-sandbox:stable' "$RUNNER_TEMP/docker-values.yaml" "$RUNNER_TEMP/docker-render.yaml"; then
+            exit 1
+          fi
+          yq eval '.controller as $controller | .profiles = $controller.profiles |
+            .principals = $controller.principals | del(.controller) |
+            .tlsSecretName = "legacy-serving" | .resources.requests.cpu = "123m"' \
+            "$RUNNER_TEMP/standard-values.yaml" > "$RUNNER_TEMP/legacy-values.yaml"
+          helm template standard "$chart" -f "$RUNNER_TEMP/legacy-values.yaml" > "$RUNNER_TEMP/legacy-render.yaml"
+          rg -q 'secretName: "legacy-serving"' "$RUNNER_TEMP/legacy-render.yaml"
+          rg -q 'cpu: 123m' "$RUNNER_TEMP/legacy-render.yaml"
+          helm template standard "$chart" -f "$RUNNER_TEMP/legacy-values.yaml" \
+            --set controller.tlsSecretName=override-serving --set controller.resources.requests.cpu=234m > "$RUNNER_TEMP/override-render.yaml"
+          rg -q 'secretName: "override-serving"' "$RUNNER_TEMP/override-render.yaml"
+          rg -q 'cpu: 234m' "$RUNNER_TEMP/override-render.yaml"
+          if rg -q 'secretName: "legacy-serving"|cpu: 123m' "$RUNNER_TEMP/override-render.yaml"; then
+            exit 1
+          fi
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
       - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
   version:

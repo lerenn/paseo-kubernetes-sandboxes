@@ -22,11 +22,11 @@
 <main id="content">
     <h1>Reference</h1>
     <h2 id="controller-install">Backend installation</h2>
-    <p>Install the Standard and Docker controllers as separate Helm releases with <code>installation.role: backend</code>. Keep each in its own namespace with its required workspace storage and admission policy. The Docker release is optional.</p>
+    <p>Select Standard and Docker from the shared values file and install them as separate Helm releases. Keep each in its own namespace with its required workspace storage and admission policy. The Docker release is optional.</p>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#install-gateway-and-backends">Helm commands and values</a></p>
     <h2 id="gateway-install">Required Gateway</h2>
     <p>Install a release with <code>installation.role: gateway</code>. Provide a serving TLS Secret, a retained ReadWriteOncePod claim, backend HTTPS origins and per-principal profile grants. Cert-manager provisions and renews private controller serving and Gateway client certificates across namespaces. Each controller verifies the Gateway identity and applies the mapped backend principal's grants.</p>
-    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/gateway-values.example.yaml">Example Gateway values</a></p>
+    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/installation-values.example.yaml">Shared installation values</a></p>
     <p>For an existing direct installation, verify Gateway profiles and HTTP/2, stop old sandboxes and migrate the saved assignments in the upgraded plugin. Retire direct access after the cutover is verified.</p>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#upgrade-from-direct-connections">Staged upgrade procedure</a></p>
     <h2 id="connection">Gateway settings</h2>

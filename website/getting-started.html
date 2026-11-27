@@ -16,7 +16,7 @@
   <section aria-labelledby="admin-setup">
     <h2 id="admin-setup">Admin setup</h2>
     <ol>
-      <li>Install the Gateway and Standard controller with Helm. Add a separate Docker controller in an approved namespace if you offer Docker. Prepare shared workspace storage and a persistent volume for Gateway routing.</li>
+      <li>Set up the Gateway and Standard controller from one shared Helm values file. Add a separate Docker controller in an approved namespace if you offer Docker. Prepare shared workspace storage and a persistent volume for Gateway routing.</li>
       <li>Use cert-manager for private controller and Gateway client TLS. Provide the Gateway serving certificate and expose its HTTPS endpoint on a route that carries bidirectional HTTP/2.</li>
       <li>Give each Paseo daemon one Gateway token and grant Standard and, where appropriate, Docker. Share the HTTPS URL, daemon-local token file path and private Gateway CA path if needed.</li>
     </ol>

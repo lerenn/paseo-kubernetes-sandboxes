@@ -1,0 +1,85 @@
+# Pass this single file through scripts/helm-installation to select each release.
+shared:
+  internalTLS:
+    issuerName: paseo-sandbox-internal
+
+releases:
+  gateway:
+    internalTLS:
+      bootstrap: true
+    gateway:
+      tlsSecretName: gateway-tls
+      clientIdentity: sandbox-gateway.paseo.svc
+      stateClaimName: gateway-state
+      backends:
+        standard-controller:
+          url: https://standard-sandbox-controller.standard.svc
+        docker-controller:
+          url: https://docker-sandbox-controller.docker.svc
+      profiles:
+        standard:
+          backend: standard-controller
+          profile: standard
+          privileged: false
+        docker:
+          backend: docker-controller
+          profile: docker
+          privileged: true
+      principals:
+        paseo-daemon:
+          tokenSha256: "REPLACE_WITH_GATEWAY_TOKEN_SHA256"
+          profiles: [standard, docker]
+          backendPrincipals:
+            standard-controller: paseo-daemon
+            docker-controller: paseo-daemon
+
+  standard:
+    controller:
+      profiles:
+        standard:
+          image: ghcr.io/your-org/paseo-sandbox:stable
+          worktree:
+            claimName: paseo-worktrees
+            basePath: /srv/paseo/worktrees
+          repository:
+            claimName: paseo-repositories
+            basePath: /srv/paseo/repos
+          idleMinutes: 120
+          container:
+            resources:
+              requests:
+                cpu: 250m
+                memory: 256Mi
+              limits:
+                cpu: "2"
+                memory: 2Gi
+
+      principals:
+        paseo-daemon:
+          gatewayIdentity: sandbox-gateway.paseo.svc
+          profiles: [standard]
+
+  docker:
+    controller:
+      profiles:
+        docker:
+          image: ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable
+          worktree:
+            claimName: paseo-worktrees
+            basePath: /srv/paseo/worktrees
+          repository:
+            claimName: paseo-repositories
+            basePath: /srv/paseo/repos
+          docker:
+            enabled: true
+            image: docker:28.5.2-dind
+            sizeLimit: 20Gi
+            socketGroup: 1000
+          podSpec:
+            securityContext:
+              supplementalGroups: [1000]
+
+      principals:
+        paseo-daemon:
+          gatewayIdentity: sandbox-gateway.paseo.svc
+          profiles: [docker]

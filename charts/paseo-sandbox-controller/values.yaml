@@ -14,28 +14,15 @@ internalTLS:
   bootstrap: false
   clusterResourceNamespace: cert-manager
 
-# Optional controller serving Secret (tls.crt, tls.key). Use for externally managed PKI or staging
-# with an existing serving certificate. Otherwise cert-manager issues a certificate for the Service.
-tlsSecretName: ""
-
-# Map of profile names to image, worktree, optional repository, and administrator-owned pod configuration.
-# Optional idleMinutes (default 120, 0 disables) deletes a sandbox with no running command for that long.
-# A volume mapping has claimName, basePath (as seen by Paseo), and optional subPath.
-# The reserved standard profile is the Paseo default when available.
-# Docker support requires docker.enabled: true and docker.image on a separate profile.
-profiles: {}
-
-# Map of backend principal names to gatewayIdentity (DNS SAN) and allowed profiles.
-principals: {}
-
-resources:
-  requests:
-    cpu: 50m
-    memory: 64Mi
-  limits:
-    memory: 256Mi
-
 controller:
+  # Existing serving TLS Secret (tls.crt, tls.key). Empty uses cert-manager.
+  tlsSecretName: ""
+  # Profile names map to the image, shared worktree, optional repository and pod configuration.
+  profiles: null
+  # Principal names map to the Gateway DNS SAN and a list of allowed profiles.
+  principals: null
+  # Omit to use the chart defaults (50m CPU, 64Mi memory request, 256Mi memory limit).
+  resources: null
   gatewayClientCASecretName: ""
   # Temporary opt-in only for upgrading direct installations. Legacy token digests may then be supplied.
   allowDirectMigration: false

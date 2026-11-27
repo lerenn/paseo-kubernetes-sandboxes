@@ -34,7 +34,7 @@ Each controller accepts only its configured principals and profiles, scopes pod 
 
 1. Prepare shared storage in the backend namespaces and a dedicated, retained ReadWriteOncePod PVC in the Gateway namespace. Create the external Gateway serving TLS Secret for the hostname the daemon uses. A private route such as TLS passthrough must preserve bidirectional HTTP/2 and allow long-lived streams.
 2. Install cert-manager for managed internal TLS. Set `internalTLS.issuerName` to the same dedicated private ClusterIssuer name in every release. The Gateway release can create the issuer and its root with `internalTLS.bootstrap: true`. Its prerequisite is access to cert-manager's cluster resource namespace (default `cert-manager`) and to ClusterIssuers. Restrict issuance through the private issuer to this installation's operators and namespaces. In a shared cluster, use a managed issuer with issuance policy that reserves the Gateway DNS identity. Any client certificate issued with that identity by a trusted CA can act as the Gateway.
-3. Copy the values for [Gateway](../config/gateway-values.example.yaml), [Standard](../config/controller-values.example.yaml) and, if enabled, [Docker](../config/docker-values.example.yaml). Update the image and volume mappings, Service HTTPS names, Gateway serving Secret, and state claim. Use the same dedicated DNS SAN for `gateway.clientIdentity` and each matching backend principal's `gatewayIdentity`. Use one stable backend principal per Gateway principal per backend. Map each principal's allowed aliases with `gateway.principals.<name>.profiles` and map the backend IDs to stable principal names with `backendPrincipals`. Grant only the matching backend profiles in each controller's `principals` section.
+3. Copy [the shared installation values](../config/installation-values.example.yaml) to `values.yaml`. Edit shared settings once and update each release under `releases.gateway`, `releases.standard` and, if enabled, `releases.docker`. Update the image and volume mappings, Service HTTPS names, Gateway serving Secret, and state claim. Use the same dedicated DNS SAN for `gateway.clientIdentity` and each matching backend principal's `gatewayIdentity`. Use one stable backend principal per Gateway principal per backend. Map each principal's allowed aliases with `gateway.principals.<name>.profiles` and map the backend IDs to stable principal names with `backendPrincipals`. Grant only the matching backend profiles in each release's `controller.principals` section.
 4. Generate one token per Paseo daemon. Place the raw token in a daemon-readable file, and set its digest as `gateway.principals.<name>.tokenSha256`. Grant `standard` and add `docker` only for authorized daemons. For a Standard-only installation, omit the Docker alias, backend and grants from the Gateway values.
 
    ```sh
@@ -43,20 +43,24 @@ Each controller accepts only its configured principals and profiles, scopes pod 
    tr -d '\n' < gateway.token | sha256sum
    ```
 
-5. Install the releases with the chart below. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
+5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller
-   helm upgrade --install gateway "$chart" --version 0.6.0 -n paseo -f gateway-values.yaml --wait
-   helm upgrade --install standard "$chart" --version 0.6.0 -n standard -f standard-values.yaml --wait
-   helm upgrade --install docker "$chart" --version 0.6.0 -n docker -f docker-values.yaml --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.0/paseo-sandbox-controller-0.6.0.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.0 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.0 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.0 -n docker --wait
    ```
+
+   For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
+
+   The release archive works without registry credentials. The chart also publishes to `oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller` for OCI-based deployment.
 
    For a source build, use `charts/paseo-sandbox-controller` and set `image` to your build. Set `imagePullSecrets` for namespaces that need private registry access.
 
 The Gateway uses a dedicated internal client certificate. Controllers verify its CA and configured DNS SAN before accepting the asserted backend principal, and the Gateway verifies the CA and hostname of each controller. Cert-manager issues 24-hour serving and client certificates, renews them with eight hours remaining and rotates their keys. The Gateway reads new client material on each connection, and the servers reload mounted TLS material for new connections. The bootstrapped root is renewed with the same trust key. For a root key rollover, use operator-managed overlapping CA bundles and renew leaves under the replacement issuer before removing the old CA.
 
-With externally managed PKI, supply the Gateway client Secret through `gateway.credentialsSecretName` with `tls.crt`, `tls.key` and backend trust `ca.crt`. Set `gateway.backends.<id>.caFile` when a backend needs a different CA key in that Secret. For each controller, provide a serving `tlsSecretName` and a `controller.gatewayClientCASecretName` containing the client CA at `ca.crt`. The Gateway serving Secret is separate and may use a publicly trusted certificate such as Let's Encrypt. Backend servers and client certificates use private trust.
+With externally managed PKI, supply the Gateway client Secret through `gateway.credentialsSecretName` with `tls.crt`, `tls.key` and backend trust `ca.crt`. Set `gateway.backends.<id>.caFile` when a backend needs a different CA key in that Secret. For each controller, provide a serving `controller.tlsSecretName` and a `controller.gatewayClientCASecretName` containing the client CA at `ca.crt`. The Gateway serving Secret is separate and may use a publicly trusted certificate such as Let's Encrypt. Backend servers and client certificates use private trust.
 
 From the daemon network verify Gateway HTTPS and authenticated HTTP/2 profile discovery. Expect HTTP 200 and each alias granted to that daemon. Use `--cacert` with a private Gateway serving CA.
 
