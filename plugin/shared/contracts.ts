@@ -5,7 +5,23 @@ import { connectionSchema, settingsSchema } from "./settings.js";
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
 
-export const sandboxProfile = z.object({ id: z.string(), label: z.string(), privileged: z.boolean() });
+const quantities = z.object({
+  cpu: z.string().optional(),
+  memory: z.string().optional(),
+  "ephemeral-storage": z.string().optional(),
+});
+
+export const sandboxProfile = z.object({
+  id: z.string(),
+  label: z.string(),
+  privileged: z.boolean(),
+  resources: z.array(z.object({
+    kind: z.enum(["main", "sidecar", "init"]),
+    name: z.string(),
+    requests: quantities,
+    limits: quantities,
+  })).optional(),
+});
 export type SandboxProfile = z.infer<typeof sandboxProfile>;
 
 // Connection check and the profiles authorized by the token.
