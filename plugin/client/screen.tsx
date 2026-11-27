@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { z } from "zod";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { ExternalLink, Icon, Loading, ScrollView } from "@getpaseo/plugin/client/ui";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ExternalLink, Icon, Loading, ScrollView, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
 import {
@@ -199,15 +199,10 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
           {tab === "connection" && <Card theme={theme} icon="Shield" title="Execution policy" description="Applies to new launches on this Paseo host.">
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={{ ...text, color: theme.colors.foreground }}>Require a sandbox profile</Text>
-                <Text style={text}>Require an authorized profile for workspace agent sessions, terminals and setup commands. Existing sessions, history recovery and teardown can continue.</Text>
-              </View>
-              <Switch accessibilityLabel="Require a sandbox profile"
-                value={config.requireSandboxProfile} disabled={busy || settings.status !== "ready"}
-                onValueChange={(required) => void action(() => save({ ...config, requireSandboxProfile: required }))} />
-            </View>
+            <SettingsSwitch label="Require a sandbox profile"
+              hint="Require an authorized profile for workspace agent sessions, terminals and setup commands. Existing sessions and unassigned workspace history and teardown stay available."
+              value={config.requireSandboxProfile} disabled={busy || settings.status !== "ready"}
+              onValueChange={(required) => void action(() => save({ ...config, requireSandboxProfile: required }))} />
           </Card>}
           {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
             {config.connections.length > 0 && (
