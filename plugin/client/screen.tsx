@@ -6,7 +6,7 @@ import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/cl
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList, type SandboxProfile } from "../shared/contracts.js";
 import {
   isConfigured, needsGatewayMigration, namedConnectionSchema, sandboxSettings, settingsSchema, standardConnectionId,
-  workspaceRoute, type Configuration, type NamedConnection,
+  type Configuration, type NamedConnection,
 } from "../shared/settings.js";
 import { Badge, Button, Card, Choice, Field } from "./components.js";
 
@@ -338,7 +338,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                       });
                       setEditor(null);
                     })} />
-                  {editor.existing && !config.workspaces.some(({ connectionId }) => connectionId === editor.connection.id) && (
+                  {editor.existing && !config.workspaces.some(({ connectionId }) => connectionId === editor.connection.id) && !rows?.some(({ assignedConnection }) => assignedConnection === editor.connection.id) && (
                     <Button theme={theme} label="Remove Gateway" disabled={busy} onPress={() => void action(async () => {
                       await save({ ...config, connections: config.connections.filter(({ id }) => id !== editor.connection.id) });
                       setEditor(null);
@@ -375,7 +375,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             {rows?.length === 0 && <Text style={text}>No workspaces on this host.</Text>}
             {!available.length && rows?.length ? <Text style={text}>Save a Gateway credential that grants access to at least one profile.</Text> : null}
             {rows?.map((row) => {
-              const route = workspaceRoute(config, row.id);
+              const connection = config.connections.find(({ id }) => id === row.assignedConnection);
+              const route = connection ? { connection, workspace: { profile: row.assignedProfile, privileged: row.assignedPrivilege } } : undefined;
               const chosen = route && checks?.get(route.connection.id)?.profiles.find(({ id, privileged }) =>
                 id === route.workspace.profile && (route.workspace.privileged === undefined || privileged === route.workspace.privileged));
               const choosing = selection?.workspace === row.id ? selection : null;
@@ -408,7 +409,11 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     )}
                     {route && !hasSandbox && !choosing && !config.requireSandboxProfile && (
                       <Button theme={theme} label="Disable sandbox" disabled={busy}
-                        onPress={() => void action(() => save({ ...config, workspaces: config.workspaces.filter(({ id }) => id !== row.id) }))} />
+                        onPress={() => void action(() => save({
+                          ...config,
+                          workspaces: config.workspaces.filter(({ id }) => id !== row.id),
+                          localWorkspaces: row.createdWithProfile ? [...config.localWorkspaces, row.id] : config.localWorkspaces,
+                        }))} />
                     )}
                   </View>
                   {route && hasSandbox && !confirming && (
@@ -443,7 +448,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                           disabled={busy || !selected || hasSandbox}
                           onPress={() => void action(async () => {
                             if (!selected) return;
-                            await save({ ...config, workspaces: [
+                            await save({ ...config, localWorkspaces: config.localWorkspaces.filter((id) => id !== row.id), workspaces: [
                               ...config.workspaces.filter((w) => w.id !== row.id),
                               { id: row.id, connectionId: choosing.connectionId, profile: selected.id, privileged: selected.privileged },
                             ] });

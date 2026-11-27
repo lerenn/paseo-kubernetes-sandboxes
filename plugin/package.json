@@ -1,6 +1,6 @@
 {
   "name": "paseo-sandboxes",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,8 +11,8 @@
     "pretest": "npm run build:launcher"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.17.5",
-    "@getpaseo/plugin": "0.17.5",
+    "@getpaseo/client": "0.18.0",
+    "@getpaseo/plugin": "0.18.0",
     "@types/node": "^22.0.0",
     "@types/react": "19.1.0",
     "react": "19.1.0",

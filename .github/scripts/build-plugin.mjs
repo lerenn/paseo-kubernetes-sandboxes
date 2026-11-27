@@ -4,7 +4,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [nodeModules, pluginDir, version = "0.17.5"] = process.argv.slice(2);
+const [nodeModules, pluginDir, version = "0.18.0"] = process.argv.slice(2);
 const compiler = path.resolve(nodeModules, "@getpaseo/server/dist/server/server/plugins/compiler-build.js");
 const { compileDirectoryPlugin } = await import(pathToFileURL(compiler).href);
 try {

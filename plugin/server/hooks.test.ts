@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { migrateSettings, settingsSchema } from "../shared/settings.js";
+import { executionKey, withWorkspaceExecution } from "../shared/execution.js";
 import { wrapFor, type HookDeps } from "./hooks.js";
 
 const legacy = {
@@ -116,4 +117,36 @@ test("required profiles recheck authorization and pin privilege even for legacy 
     ...required,
     profiles: async () => [{ id: "docker", label: "Docker", privileged: true }],
   }, { ...launch, workspaceId: "w2" }), /Select an authorized profile/);
+});
+
+test("a new workspace's Execution choice routes setup before any settings assignment", async () => {
+  const metadata = { [executionKey]: { connectionId: "standard", profile: "docker", privileged: true } };
+  const configuration = async () => withWorkspaceExecution(config, [{ id: "created", metadata }]);
+  const wrap = await wrapFor({
+    ...deps, configuration,
+    profiles: async () => [{ id: "docker", label: "Docker", privileged: true }],
+    ensure: async (route, id) => {
+      assert.equal(id, "created");
+      assert.equal(route.profile, "docker");
+      assert.equal(route.privileged, true);
+    },
+  }, { ...launch, workspaceId: "created" });
+  assert.ok(wrap?.includes("docker"));
+});
+
+test("a route assigned after creation takes effect on the original workspace's next launch", async () => {
+  const entries = [{ id: "created", metadata: { [executionKey]: "local" } }];
+  const input = { ...launch, workspaceId: "created" };
+  let saved = config;
+  const retryDeps = {
+    ...deps,
+    configuration: async () => withWorkspaceExecution(saved, entries),
+    profiles: async () => [{ id: "docker", label: "Docker", privileged: true }],
+    ensure: async () => { throw new Error("Gateway unavailable"); },
+  };
+  assert.equal(await wrapFor(retryDeps, input), undefined);
+  saved = { ...saved, workspaces: [...saved.workspaces, {
+    id: "created", connectionId: "standard", profile: "docker", privileged: true,
+  }] };
+  await assert.rejects(wrapFor(retryDeps, input), /Gateway unavailable/);
 });

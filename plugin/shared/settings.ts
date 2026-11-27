@@ -41,6 +41,7 @@ export const profileRequiredMessage =
 
 export const settingsSchema = z.object({
   requireSandboxProfile: z.boolean().default(false),
+  localWorkspaces: z.array(z.string().min(1).max(200)).max(500).default([]),
   connections: z.array(namedConnectionSchema).max(20).default([]),
   workspaces: z.array(z.object({
     id: z.string().min(1).max(200),
@@ -48,9 +49,10 @@ export const settingsSchema = z.object({
     profile: profileId.optional(),
     privileged: z.boolean().optional(),
   })).max(500).default([]),
-}).superRefine(({ connections, workspaces }, ctx) => {
+}).superRefine(({ connections, workspaces, localWorkspaces }, ctx) => {
   const ids = new Set(connections.map(({ id }) => id));
-  if (ids.size !== connections.length || new Set(workspaces.map(({ id }) => id)).size !== workspaces.length) {
+  const workspaceIds = [...workspaces.map(({ id }) => id), ...localWorkspaces];
+  if (ids.size !== connections.length || new Set(workspaceIds).size !== workspaceIds.length) {
     ctx.addIssue({ code: "custom", message: "Connection and workspace IDs must be unique." });
   }
   if (workspaces.some(({ connectionId }) => !ids.has(connectionId))) {
