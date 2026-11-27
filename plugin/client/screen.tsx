@@ -161,7 +161,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           <ExternalLink href={setupGuide}>Setup guide</ExternalLink>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View role="tablist" style={{ flexDirection: "row", gap: 4 }}>
+          <View role="tablist" style={{ flexDirection: "row", gap: layout.compact ? 0 : 4 }}>
             {TABS.map((t) => {
               const active = tab === t.id;
               return (
@@ -171,7 +171,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   aria-selected={active}
                   accessibilityLabel={t.label}
                   onPress={() => setTab(t.id)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: layout.compact ? 5 : 7, paddingHorizontal: layout.compact ? 4 : 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: layout.compact ? 4 : 7, paddingHorizontal: layout.compact ? 2 : 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
                 >
                   <Icon name={t.icon} size={15} color={active ? theme.colors.accent : theme.colors.foregroundMuted} />
                   <Text style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 14, fontWeight: "600" }}>{t.label}</Text>
