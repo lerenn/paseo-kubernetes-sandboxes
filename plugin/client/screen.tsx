@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ExternalLink, Icon, Loading, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
@@ -10,8 +10,8 @@ import {
 import { Badge, Button, Card, Choice, Field } from "./components.js";
 
 const TABS = [
-  { id: "connection", label: "Controller connections", icon: "Server" },
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
+  { id: "connection", label: "Controller connections", icon: "Server" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -59,7 +59,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   const list = useRpc(workspacesList);
   const stop = useRpc(sandboxStop);
   const prepareSave = useRpc(prepareSettingsSave);
-  const [tab, setTab] = useState<TabId>("connection");
+  const [tab, setTab] = useState<TabId>(TABS[0].id);
   const [editor, setEditor] = useState<{ connection: NamedConnection; existing: boolean } | null>(null);
   const [editorCheck, setEditorCheck] = useState<Awaited<ReturnType<typeof check>> | null>(null);
   const [checks, setChecks] = useState<Record<string, Awaited<ReturnType<typeof check>>>>({});
@@ -157,13 +157,25 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
           {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
-            {config.connections.map((connection) => (
-              <View key={connection.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Text style={text}>{connection.name} ({connection.id})</Text>
-                <Button theme={theme} label={`Edit ${connection.name}`} disabled={busy}
-                  onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
+            {config.connections.length > 0 && (
+              <View role="table" accessibilityLabel="Saved controller connections" style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8 }}>
+                <View role="row" style={[connectionTable.row, { backgroundColor: theme.colors.surface2, borderTopLeftRadius: 7, borderTopRightRadius: 7 }]}>
+                  <Text role="columnheader" style={[text, connectionTable.name, connectionTable.heading]}>Name</Text>
+                  <Text role="columnheader" style={[text, connectionTable.id, connectionTable.heading]}>ID</Text>
+                  <Text role="columnheader" style={[text, connectionTable.actions, connectionTable.heading, connectionTable.actionsHeading]}>Actions</Text>
+                </View>
+                {config.connections.map((connection) => (
+                  <View key={connection.id} role="row" style={[connectionTable.row, { borderTopWidth: 1, borderColor: theme.colors.border }]}>
+                    <Text role="cell" numberOfLines={2} style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
+                    <Text role="cell" numberOfLines={2} style={[text, connectionTable.id]}>{connection.id}</Text>
+                    <View role="cell" style={connectionTable.actions}>
+                      <Button theme={theme} label="Edit" accessibilityLabel={`Edit ${connection.name}`} disabled={busy}
+                        onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
+                    </View>
+                  </View>
+                ))}
               </View>
-            ))}
+            )}
             {!editor && (
               <Button theme={theme} label="Add connection" disabled={busy || config.connections.length >= 20}
                 onPress={() => {
@@ -325,3 +337,18 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     </View>
   );
 }
+
+const connectionTable = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  name: { flex: 3, minWidth: 0 },
+  id: { flex: 2, minWidth: 0 },
+  actions: { width: 76, alignItems: "flex-end" },
+  heading: { fontWeight: "600" },
+  actionsHeading: { textAlign: "right" },
+});

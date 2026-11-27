@@ -6,6 +6,7 @@ export type Theme = PluginScreenProps["theme"];
 export function Button({
   theme,
   label,
+  accessibilityLabel,
   onPress,
   disabled = false,
   primary = false,
@@ -14,6 +15,7 @@ export function Button({
 }: {
   theme: Theme;
   label: string;
+  accessibilityLabel?: string;
   onPress(): void;
   disabled?: boolean;
   primary?: boolean;
@@ -23,6 +25,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
