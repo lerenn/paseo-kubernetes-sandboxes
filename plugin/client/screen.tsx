@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import type { z } from "zod";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ExternalLink, Icon, Loading, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
@@ -10,8 +11,9 @@ import {
 import { Badge, Button, Card, Choice, Field } from "./components.js";
 
 const TABS = [
-  { id: "connection", label: "Controller connections", icon: "Server" },
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
+  { id: "profiles", label: "Profiles", icon: "Layers" },
+  { id: "connection", label: "Controllers", icon: "Server" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -49,6 +51,20 @@ const statusLabels = {
   unknown: "Unavailable",
 } as const;
 
+type ControllerCheck = z.infer<typeof controllerCheck.output>;
+
+function profileAvailability(connection: NamedConnection, result: ControllerCheck | null | undefined) {
+  if (!isConfigured(connection)) return "Set the controller URL and token file in Controllers.";
+  if (result === undefined) return "Checking for authorized profiles…";
+  if (result === null) return "Profile discovery failed.";
+  const reach = result.checks.find(({ id }) => id === "reach");
+  const auth = result.checks.find(({ id }) => id === "auth");
+  if (reach?.status === "fail") return "Controller unreachable.";
+  if (auth?.status === "fail") return auth.detail;
+  if (auth?.status !== "ok") return "Check the endpoint and credential files in Controllers.";
+  return result.profiles.length === 0 ? "No profiles authorized for this token." : null;
+}
+
 function blankConnection(id: string, name = ""): NamedConnection {
   return { id, name, controllerUrl: "", tokenFile: "", caFile: "" };
 }
@@ -59,21 +75,26 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   const list = useRpc(workspacesList);
   const stop = useRpc(sandboxStop);
   const prepareSave = useRpc(prepareSettingsSave);
-  const [tab, setTab] = useState<TabId>("connection");
+  const [tab, setTab] = useState<TabId>(TABS[0].id);
   const [editor, setEditor] = useState<{ connection: NamedConnection; existing: boolean } | null>(null);
   const [editorCheck, setEditorCheck] = useState<Awaited<ReturnType<typeof check>> | null>(null);
-  const [checks, setChecks] = useState<Record<string, Awaited<ReturnType<typeof check>>>>({});
+  const [discovery, setDiscovery] = useState<{
+    revision: string;
+    checks: Map<string, ControllerCheck | null>;
+  } | null>(null);
   const [rows, setRows] = useState<Awaited<ReturnType<typeof list>>["workspaces"] | null>(null);
   const [selection, setSelection] = useState<{ workspace: string; connectionId: string; profile?: string } | null>(null);
   const [confirmation, setConfirmation] = useState<{ id: string; revision: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const revision = settings.status === "ready" ? settings.revision : null;
+  const checks = discovery?.revision === revision ? discovery.checks : undefined;
 
   useEffect(() => {
     if (settings.status !== "ready") return;
     let current = true;
-    setChecks({});
+    const { revision } = settings;
+    setDiscovery({ revision, checks: new Map() });
     setRows(null);
     setSelection(null);
     setConfirmation(null);
@@ -83,9 +104,14 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
       if (current) setError("The workspace list could not be read.");
     });
     for (const connection of settings.values.connections.filter(isConfigured)) {
-      void check(connection).then((result) => {
-        if (current) setChecks((previous) => ({ ...previous, [connection.id]: result }));
-      }, () => {});
+      function record(result: ControllerCheck | null) {
+        if (current) {
+          setDiscovery((previous) => previous?.revision === revision
+            ? { revision, checks: new Map(previous.checks).set(connection.id, result) }
+            : previous);
+        }
+      }
+      void check(connection).then(record, () => record(null));
     }
     return () => { current = false; };
   }, [revision]);
@@ -112,12 +138,12 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   if (settings.status === "loading") return <Loading />;
   const config = settings.status === "ready" ? settings.values : settingsSchema.parse({});
   const validated = editor && namedConnectionSchema.safeParse(editor.connection);
-  const available = config.connections.filter(({ id }) => checks[id]?.profiles.length);
+  const available = config.connections.filter(({ id }) => checks?.get(id)?.profiles.length);
   const text = { color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 21 };
   const pad = layout.compact ? 16 : 28;
 
   function choose(workspace: string, connectionId: string, profile?: string) {
-    const standard = checks[connectionId]?.profiles.find(({ id, privileged }) => id === "standard" && !privileged);
+    const standard = checks?.get(connectionId)?.profiles.find(({ id, privileged }) => id === "standard" && !privileged);
     setSelection({ workspace, connectionId, profile: profile ?? standard?.id });
   }
 
@@ -134,36 +160,50 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           </View>
           <ExternalLink href={setupGuide}>Setup guide</ExternalLink>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
-          {TABS.map((t) => {
-            const active = tab === t.id;
-            return (
-              <Pressable
-                key={t.id}
-                accessibilityRole="tab"
-                aria-selected={active}
-                accessibilityLabel={t.label}
-                onPress={() => setTab(t.id)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
-              >
-                <Icon name={t.icon} size={15} color={active ? theme.colors.accent : theme.colors.foregroundMuted} />
-                <Text style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 14, fontWeight: "600" }}>{t.label}</Text>
-              </Pressable>
-            );
-          })}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View role="tablist" style={{ flexDirection: "row", gap: layout.compact ? 0 : 4 }}>
+            {TABS.map((t) => {
+              const active = tab === t.id;
+              return (
+                <Pressable
+                  key={t.id}
+                  accessibilityRole="tab"
+                  aria-selected={active}
+                  accessibilityLabel={t.label}
+                  onPress={() => setTab(t.id)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: layout.compact ? 4 : 7, paddingHorizontal: layout.compact ? 2 : 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
+                >
+                  <Icon name={t.icon} size={15} color={active ? theme.colors.accent : theme.colors.foregroundMuted} />
+                  <Text style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 14, fontWeight: "600" }}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </ScrollView>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
           {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
-            {config.connections.map((connection) => (
-              <View key={connection.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <Text style={text}>{connection.name} ({connection.id})</Text>
-                <Button theme={theme} label={`Edit ${connection.name}`} disabled={busy}
-                  onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
+            {config.connections.length > 0 && (
+              <View role="table" accessibilityLabel="Saved controller connections" style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8 }}>
+                <View role="row" style={[connectionTable.row, { backgroundColor: theme.colors.surface2, borderTopLeftRadius: 7, borderTopRightRadius: 7 }]}>
+                  <Text role="columnheader" style={[text, connectionTable.name, connectionTable.heading]}>Name</Text>
+                  <Text role="columnheader" style={[text, connectionTable.id, connectionTable.heading]}>ID</Text>
+                  <Text role="columnheader" style={[text, connectionTable.actions, connectionTable.heading, connectionTable.actionsHeading]}>Actions</Text>
+                </View>
+                {config.connections.map((connection) => (
+                  <View key={connection.id} role="row" style={[connectionTable.row, { borderTopWidth: 1, borderColor: theme.colors.border }]}>
+                    <Text role="cell" style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
+                    <Text role="cell" style={[text, connectionTable.id]}>{connection.id}</Text>
+                    <View role="cell" style={connectionTable.actions}>
+                      <Button theme={theme} label="Edit" accessibilityLabel={`Edit ${connection.name}`} disabled={busy}
+                        onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
+                    </View>
+                  </View>
+                ))}
               </View>
-            ))}
+            )}
             {!editor && (
               <Button theme={theme} label="Add connection" disabled={busy || config.connections.length >= 20}
                 onPress={() => {
@@ -226,6 +266,29 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             )}
           </Card>}
 
+          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each controller’s saved token.">
+            {config.connections.length === 0 && <Text style={text}>No controllers configured. Add a connection in Controllers.</Text>}
+            {config.connections.map((connection) => {
+              const result = checks?.get(connection.id);
+              const status = profileAvailability(connection, result);
+              return (
+                <View key={connection.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12, gap: 8 }}>
+                  <Text role="heading" style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>{connection.name}</Text>
+                  <Text style={text}>{connection.id}</Text>
+                  {status ? <Text style={text}>{status}</Text> : result?.profiles.map((profile) => (
+                    <View key={profile.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <View style={{ flexGrow: 1, flexShrink: 1 }}>
+                        <Text style={{ ...text, color: theme.colors.foreground }}>{profile.label}</Text>
+                        <Text style={text}>{profile.id}</Text>
+                      </View>
+                      {profile.privileged && <Badge theme={theme} label="Privileged" tone="warning" />}
+                    </View>
+                  ))}
+                </View>
+              );
+            })}
+          </Card>}
+
           {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a controller connection and its sandbox profile for each workspace.">
             <Button theme={theme} label="Refresh status" disabled={busy || settings.status !== "ready"}
               onPress={() => void action(async () => setRows((await list({})).workspaces))} />
@@ -233,12 +296,12 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             {!available.length && rows?.length ? <Text style={text}>Save a connection that grants access to at least one profile.</Text> : null}
             {rows?.map((row) => {
               const route = workspaceRoute(config, row.id);
-              const chosen = route && checks[route.connection.id]?.profiles.find(({ id, privileged }) =>
+              const chosen = route && checks?.get(route.connection.id)?.profiles.find(({ id, privileged }) =>
                 id === route.workspace.profile && (route.workspace.privileged === undefined || privileged === route.workspace.privileged));
               const choosing = selection?.workspace === row.id ? selection : null;
               const confirming = confirmation?.id === row.id && confirmation.revision === revision;
               const hasSandbox = row.sandbox !== "absent";
-              const choices = choosing ? checks[choosing.connectionId]?.profiles ?? [] : [];
+              const choices = choosing ? checks?.get(choosing.connectionId)?.profiles ?? [] : [];
               const selected = choices.find(({ id }) => id === choosing?.profile);
               return (
                 <View key={row.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingVertical: 12, gap: 8 }}>
@@ -325,3 +388,18 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     </View>
   );
 }
+
+const connectionTable = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  name: { flex: 3, minWidth: 0 },
+  id: { flex: 2.5, minWidth: 0 },
+  actions: { width: 60, alignItems: "flex-end" },
+  heading: { fontWeight: "600" },
+  actionsHeading: { textAlign: "right" },
+});
