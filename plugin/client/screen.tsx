@@ -13,10 +13,27 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+const setupGuide = "https://github.com/lerenn/paseo-kubernetes-sandbox/blob/main/docs/setup.md";
+
 const connectionFields = [
-  { key: "controllerUrl", label: "Controller URL", placeholder: "https://sandbox.example.internal" },
-  { key: "tokenFile", label: "Token file on the daemon", placeholder: "/path/to/controller.token" },
-  { key: "caFile", label: "CA file on the daemon (optional)", placeholder: "/path/to/controller-ca.crt" },
+  {
+    key: "controllerUrl",
+    label: "Controller URL",
+    placeholder: "https://sandbox.example.internal",
+    help: "Ask your administrator for the private HTTPS endpoint. The Paseo daemon must be able to reach it over HTTP/2. After entering the URL and file paths, select Save connection, then Check connection.",
+  },
+  {
+    key: "tokenFile",
+    label: "Token file on the daemon",
+    placeholder: "/path/to/controller.token",
+    help: "Ask your administrator to issue a controller token and provide the absolute path to its file on the Paseo daemon. If the daemon runs in a container, use the path inside that container. From the daemon environment, run test -r /path/to/controller.token to check readability without printing the token.",
+  },
+  {
+    key: "caFile",
+    label: "CA file on the daemon (optional)",
+    placeholder: "/path/to/controller-ca.crt",
+    help: "If the endpoint uses a private CA that the daemon does not already trust, ask your administrator for its PEM certificate and the absolute path to the mounted file inside the daemon environment. Run test -r /path/to/controller-ca.crt there to check readability. Leave this field blank if the daemon already trusts the CA.",
+  },
 ] as const;
 
 const statusLabels = {
@@ -106,7 +123,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             <Text style={{ color: theme.colors.foreground, fontSize: layout.compact ? 20 : 24, fontWeight: "700" }}>Kubernetes Sandbox</Text>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Run a workspace's agents, terminals and commands in a Kubernetes pod.</Text>
           </View>
-          <ExternalLink href="https://github.com/lerenn/paseo-kubernetes-sandbox/blob/main/docs/setup.md">Setup guide</ExternalLink>
+          <ExternalLink href={setupGuide}>Setup guide</ExternalLink>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
           {TABS.map((t) => {
@@ -131,8 +148,14 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
           {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connection" description="Use the private endpoint and credential files provided by your administrator.">
-            {connectionFields.map(({ key, label, placeholder }) => (
+            {connectionFields.map(({ key, label, placeholder, help }) => (
               <Field key={key} theme={theme} label={label} placeholder={placeholder} value={draft[key]} disabled={busy}
+                help={(
+                  <View style={{ gap: 4 }}>
+                    <Text style={text}>{help}</Text>
+                    <ExternalLink href={setupGuide}>Setup guide for administrators</ExternalLink>
+                  </View>
+                )}
                 error={validated.error?.issues.find(({ path }) => path[0] === key)?.message}
                 onChange={(value) => { setDraft((d) => ({ ...d, [key]: value })); setChecks(null); setSelection(null); setConfirmation(null); }} />
             ))}
