@@ -6,5 +6,5 @@
     "paseo": ">=0.17.5"
   },
   "icon": "assets/icon.png",
-  "build": [["npm", "ci", "--ignore-scripts"]]
+  "build": [["npm", "ci", "--ignore-scripts"], ["npm", "run", "build:launcher"]]
 }

@@ -1,68 +1,27 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { connectionSchema } from "./settings.js";
 
-export const checkStatus = z.enum(["ok", "warn", "fail", "unknown"]);
-export const check = z.object({
-  id: z.string(),
-  label: z.string(),
-  status: checkStatus,
-  detail: z.string(),
-});
+export const checkStatus = z.enum(["ok", "fail", "unknown"]);
+export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
 
-export const podInfo = z.object({
-  name: z.string(),
-  workspaceId: z.string(),
-  phase: z.string(),
-  ready: z.boolean(),
-  createdAt: z.string(),
-  lastUsed: z.string().nullable(),
-  mode: z.enum(["shared", "clone"]),
-  sidecars: z.array(z.object({ name: z.string(), ready: z.boolean() })),
+export const sandboxProfile = z.object({ id: z.string(), label: z.string(), privileged: z.boolean() });
+export type SandboxProfile = z.infer<typeof sandboxProfile>;
+
+// Connection check and the profiles authorized by the token.
+export const controllerCheck = defineRpc({
+  name: "controller.check",
+  input: connectionSchema,
+  output: z.object({ checks: z.array(check), profiles: z.array(sandboxProfile) }),
 });
 
-// Cluster, RBAC and volume checks. Never needs more than the RBAC Role in config/plugin-rbac.yaml.
-export const clusterCheck = defineRpc({
-  name: "cluster.check",
-  input: z.object({}),
-  output: z.object({
-    context: z.string(),
-    namespace: z.string(),
-    // The kubeconfig path used (empty: kubectl's default). Path only, never content.
-    kubeconfigFile: z.string(),
-    checks: z.array(check),
-  }),
-});
-
-// Context names found in the configured kubeconfig (read-only `kubectl config get-contexts -o name`).
-export const clusterContexts = defineRpc({
-  name: "cluster.contexts",
-  input: z.object({}),
-  output: z.object({ contexts: z.array(z.string()) }),
-});
-
-export const podsList = defineRpc({
-  name: "pods.list",
-  input: z.object({}),
-  output: z.object({ pods: z.array(podInfo) }),
-});
-export const podsDelete = defineRpc({
-  name: "pods.delete",
-  input: z.object({ name: z.string().max(63) }),
-  output: z.object({ pods: z.array(podInfo) }),
-});
-export const podsLogs = defineRpc({
-  name: "pods.logs",
-  input: z.object({ name: z.string().max(63) }),
-  output: z.object({ text: z.string() }),
-});
-
+export const sandboxState = z.enum(["running", "starting", "stopping", "failed", "absent", "unknown"]);
+export type SandboxState = z.infer<typeof sandboxState>;
 export const workspaceRow = z.object({
   id: z.string(),
   name: z.string(),
   directory: z.string(),
-  optedIn: z.boolean(),
-  mode: z.enum(["shared", "clone"]),
-  pod: z.string(),
+  sandbox: sandboxState,
 });
 export const workspacesList = defineRpc({
   name: "workspaces.list",
@@ -70,16 +29,9 @@ export const workspacesList = defineRpc({
   output: z.object({ workspaces: z.array(workspaceRow) }),
 });
 
-// Status of the plugin-managed SSH Secret. Only a hash prefix is ever returned, never content.
-export const sshInfo = z.object({
-  configured: z.boolean(),
-  present: z.boolean(),
-  hashPrefix: z.string(),
-  syncedAt: z.string().nullable(),
-  // The Secret matches the key and known_hosts files currently on the daemon host.
-  inSync: z.boolean(),
-  problem: z.string().nullable(),
+// Stops and removes a workspace's sandbox (it is recreated at the next launch).
+export const sandboxStop = defineRpc({
+  name: "sandbox.stop",
+  input: z.object({ workspaceId: z.string().min(1).max(200) }),
+  output: z.object({}),
 });
-export const sshStatus = defineRpc({ name: "ssh.status", input: z.object({}), output: sshInfo });
-export const sshSync = defineRpc({ name: "ssh.sync", input: z.object({}), output: sshInfo });
-export const sshRemove = defineRpc({ name: "ssh.remove", input: z.object({}), output: sshInfo });

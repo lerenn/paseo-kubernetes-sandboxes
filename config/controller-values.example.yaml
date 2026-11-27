@@ -1,0 +1,45 @@
+profiles:
+  standard:
+    image: ghcr.io/your-org/paseo-sandbox:stable
+    worktree:
+      claimName: paseo-worktrees
+      basePath: /srv/paseo/worktrees
+    repository:
+      claimName: paseo-repositories
+      basePath: /srv/paseo/repos
+    idleMinutes: 120
+    container:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+
+  # Enable only for trusted workspaces in a namespace that permits privileged containers.
+  # docker:
+  #   image: ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable
+  #   worktree:
+  #     claimName: paseo-worktrees
+  #     basePath: /srv/paseo/worktrees
+  #   repository:
+  #     claimName: paseo-repositories
+  #     basePath: /srv/paseo/repos
+  #   docker:
+  #     enabled: true
+  #     image: docker:28.5.2-dind
+  #     sizeLimit: 20Gi
+  #     socketGroup: 1000
+  #   podSpec:
+  #     securityContext:
+  #       supplementalGroups: [1000]
+
+principals:
+  paseo-daemon:
+    # Replace with the hex SHA-256 digest of the token, excluding its trailing newline.
+    tokenSha256: "REPLACE_WITH_TOKEN_SHA256"
+    profiles:
+      - standard
+      # Grant docker explicitly and only to a trusted principal.
+      # - docker

@@ -16,7 +16,15 @@ const compare = (a, b) => a.map((x, i) => x - b[i]).find((d) => d !== 0) ?? 0;
 
 const pkg = JSON.parse(readFileSync("plugin/package.json", "utf8")).version;
 const lock = JSON.parse(readFileSync("plugin/package-lock.json", "utf8"));
+const controller = JSON.parse(readFileSync("controller/package.json", "utf8"));
+const controllerLock = JSON.parse(readFileSync("controller/package-lock.json", "utf8"));
+const chart = readFileSync("charts/paseo-sandbox-controller/Chart.yaml", "utf8");
 const found = {
+  "controller/package.json": controller.version,
+  "controller/package-lock.json": controllerLock.version,
+  "controller/package-lock.json (packages[''])": controllerLock.packages?.[""]?.version,
+  "Chart.yaml (version)": /^version: (.+)$/m.exec(chart)?.[1],
+  "Chart.yaml (appVersion)": /^appVersion: "(.+)"$/m.exec(chart)?.[1],
   "plugin/package.json": pkg,
   "plugin/package-lock.json (version)": lock.version,
   "plugin/package-lock.json (packages[''])": lock.packages?.[""]?.version,

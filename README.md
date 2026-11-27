@@ -1,75 +1,20 @@
-# paseo-sandboxes
+# Paseo Kubernetes Sandbox
 
-Run a Paseo workspace's agents, terminals and commands in a Kubernetes pod.
+Run opted-in Paseo agents, terminals and commands in a Kubernetes pod. The Paseo daemon keeps the workspace and its file views. The pod mounts the same worktree at the same absolute path.
 
-A plugin for Paseo **0.17.5+**. For workspaces you opt in, it returns a launch wrap from the
-`agent.open.before`, `terminal.create.before` and `command.run.before` hooks. Paseo then starts
-`[...wrap, command, ...args]`; the wrap runs the command in a pod through `kubectl exec`. The workspace
-stays on the main daemon; there is no daemon, gateway or operator in the pod. One pod per workspace serves all its conversations, terminals and commands.
-
-## Requirements
-
-- Paseo 0.17.5 or later; `kubectl` on the daemon host; a Kubernetes cluster.
-- A namespace where your kubectl identity can manage pods, pods/exec, pods/log and claims (see [Cluster rights](#cluster-rights-only-if-your-identity-lacks-them)).
-- An image with a shell, git and the programs your agents need.
-- For the shared worktree mode: a PersistentVolumeClaim holding the worktrees and repositories.
-  For the pod-local clone mode: git access from the cluster (a Secret for private repositories).
-
-## Storage modes (per workspace)
-
-- **Shared worktree** (default): the pod mounts the workspace's worktree folder and the main repository's
-  `.git` directory at their own absolute paths (a worktree's `.git` file points outside its folder, so
-  both are needed). Not the main checkout's working tree. The pod can read and write the whole repository
-  (all branches, history, config, hooks): resource and process isolation, not a security boundary.
-- **Pod-local clone**: the pod clones the repository into its own storage (`emptyDir`, or an optional
-  per-sandbox volume) and works there. Paseo's file tree, diffs and git status read the daemon's disk, so
-  they do not show what agents did in the pod; results come back through git. Deleting the pod loses
-  unpushed work unless a volume is used.
+An administrator installs the controller with Helm, defines sandbox profiles and issues scoped bearer tokens. The Paseo plugin connects to the controller over private HTTPS. The controller's namespaced Kubernetes identity creates, executes in and deletes sandbox pods.
 
 ## Install and use
 
-```sh
-cd plugin && npm ci && paseo plugin install "$PWD"
-```
+- Administrators need Kubernetes 1.34 or later, Helm 3 or later, shared persistent storage and an endpoint reachable from the Paseo daemon. The endpoint must carry HTTP/2.
+- Paseo users need Paseo 0.17.5 or later and Node.js on the daemon host. Set the controller URL, token file, CA file if required and a profile in **Kubernetes Sandbox**. Check and save the connection, then choose a profile as you enable each workspace. Standard is selected by default when the token grants access.
 
-Open **Kubernetes Sandbox** from the sidebar: set the image and storage in **Settings**, run **Check
-cluster**, then opt workspaces in and pick their mode on the **Workspaces** tab. Full guide: [docs/setup.md](docs/setup.md).
+[Set up the controller and plugin](docs/setup.md).
 
-### Cluster rights (only if your identity lacks them)
+The controller creates a pod on first use. Agents and terminals in the same workspace share the pod. Archiving the workspace, disabling its opt-in or using **Stop sandbox** requests pod deletion. The profile's idle timeout also reclaims unused pods. Worktree data persists on the shared volume. To change profiles, confirm stopping an existing sandbox first. Running processes and ephemeral state are lost when the pod is deleted.
 
-Needed only when **Check cluster** reports missing rights (not needed with cluster-admin, or when a GitOps
-repository already applies the Role). The plugin cannot grant itself rights; a cluster admin runs:
+## Development and releases
 
-```sh
-kubectl create namespace paseo-sandboxes
-kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
-  --role=paseo-sandboxes --user=<the identity kubectl uses>
-```
+Run `make test` from the repository root. CI also compiles the plugin with the Paseo compiler, builds the controller image, and renders and packages the chart.
 
-## Limits
-
-- Disabling the plugin makes opted-in workspaces silently run locally again.
-- Wrapped shells lose command-completion reporting for `paseo.json` scripts.
-- Resource and process isolation, not a security boundary: in shared mode the pod shares the repository with the daemon.
-- Not tested yet against a real daemon and cluster: agents, ports, file views, clone mode. The layouts come from the docs and one live worktree; Paseo's worktree-creation source was not read.
-
-## Development
-
-```sh
-make test   # typecheck, unit tests (fake kubectl, no cluster), version check
-```
-
-`plugin/` holds the plugin (`index.server.ts`, `index.client.tsx`, `launcher/kube-exec.sh`). CI runs tests,
-a plugin build check, a manifest check and a version check. Bumping `plugin/package.json` on `main` tags and
-releases that version.
-
-## Auto-merge
-
-Add the `automerge` label to one of the owner's PRs and GitHub squash-merges it once the required checks on
-its base branch pass (`.github/workflows/automerge.yaml`; "Allow auto-merge" must be on). Without required
-checks on the base branch it merges as soon as the PR is mergeable. A merge that bumps `plugin/package.json`
-on `main` is tagged and released by `release.yaml`; if a merge made with the workflow token does not trigger
-it, run Release by hand (`workflow_dispatch`).
-The static site in `website/` is previewed with
-`python3 -m http.server 8091 --directory website`.
+Keep the plugin, controller and chart versions aligned. Merging a version bump to `main` publishes the controller image and OCI Helm chart, then creates the GitHub release. Use the **Release** workflow on `main` to retry interrupted publication. The site is served from `website/` and can be previewed with `python3 -m http.server 8091 --directory website`.

@@ -1,0 +1,25 @@
+imageRepository: ghcr.io/lerenn/paseo-kubernetes-sandboxes
+# Optional full image reference, for example to pin a digest.
+image: ""
+imagePullSecrets: []
+# Secret (tls.crt, tls.key) serving HTTPS. Empty: the chart generates a private CA and a certificate for the Service
+# and keeps them in "<release>-sandbox-controller-tls"; give the Paseo plugin that Secret's ca.crt as its CA file.
+tlsSecretName: ""
+
+# Map of profile names to image, worktree, optional repository, and administrator-owned pod configuration.
+# Optional idleMinutes (default 120, 0 disables) deletes a sandbox with no running command for that long.
+# A volume mapping has claimName, basePath (as seen by Paseo), and optional subPath.
+# The reserved standard profile is the Paseo default when available.
+# Docker support requires docker.enabled: true and docker.image on a separate profile.
+profiles: {}
+
+# Map of principal names to tokenSha256 and allowed profile names.
+# Supply the digest of a randomly generated token and give the raw token to the Paseo daemon.
+principals: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

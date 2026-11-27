@@ -1,7 +1,4 @@
 name: Release
-# Merging a version bump to main releases it: if vX.Y.Z (plugin/package.json) has no tag yet, create
-# the tag and the GitHub release. Idempotent: an already tagged version is a no-op. Re-run a failed
-# release with workflow_dispatch on main. There are no images or charts to publish.
 on:
   push:
     branches: [main]
@@ -12,25 +9,68 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: write
+  packages: write
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - id: v
-        run: |
-          version=$(node -p 'require("./plugin/package.json").version')
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
-            echo "v$version is already tagged: nothing to release"
-            echo "new=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "new=true" >> "$GITHUB_OUTPUT"
-          fi
       - run: node .github/scripts/check-version.mjs
-        if: steps.v.outputs.new == 'true'
-      - name: Create the vX.Y.Z tag and GitHub release
-        if: steps.v.outputs.new == 'true'
+      - id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { version } = require('./plugin/package.json');
+            const tag = `v${version}`;
+            core.setOutput('tag', tag);
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              core.setOutput('exists', 'true');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.setOutput('exists', 'false');
+            }
+      - if: steps.release.outputs.exists == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.release.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+      - if: steps.release.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: controller/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.release.outputs.tag }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - if: steps.release.outputs.exists == 'false'
+        uses: azure/setup-helm@v4
+      - if: steps.release.outputs.exists == 'false'
+        name: Publish the Helm chart
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.v.outputs.version }}" --target "$GITHUB_SHA" --title "v${{ steps.v.outputs.version }}" --generate-notes
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
+          helm push "$RUNNER_TEMP/paseo-sandbox-controller-${RELEASE_TAG#v}.tgz" "oci://$IMAGE/charts"
+      - if: steps.release.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: tag,
+              name: tag,
+              target_commitish: context.sha,
+              generate_release_notes: true,
+            });

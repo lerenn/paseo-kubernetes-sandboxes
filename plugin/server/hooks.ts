@@ -1,16 +1,14 @@
-import { modeOf, optedIn, type Configuration } from "../shared/settings.js";
-import { podName } from "../shared/sandbox.js";
-import { ensurePod, listPods, podCwd } from "./pods.js";
+import { isConfigured, type Configuration } from "../shared/settings.js";
+import { ensureSandbox, getSandbox } from "./controller.js";
 import { resolveRepo, type RepoInfo } from "./repo.js";
-import type { Kubectl } from "./kubectl.js";
 import { buildWrap, forwardableEnv, type Wrap } from "./launch.js";
 
 export type HookDeps = {
   configuration(): Promise<Configuration>;
-  kubectl(c: Configuration): Kubectl;
-  launcher?: string;
   repo?(cwd: string): Promise<RepoInfo>;
-  // Paseo gives hooks 30 seconds; stop waiting for a starting pod before that.
+  ensure?: typeof ensureSandbox;
+  status?: typeof getSandbox;
+  // Paseo gives hooks 30 seconds; stop waiting for a starting sandbox before that.
   startTimeoutMs?: number;
 };
 
@@ -19,19 +17,20 @@ export type LaunchInput = {
   cwd: string;
   env: Record<string, string>;
   wrap?: readonly string[];
-  // Never create a pod for this launch (worktree teardown after the workspace was archived).
+  // Never create a sandbox for this launch (worktree teardown after the workspace was archived).
   reuseOnly?: boolean;
 };
 
-// Returns the wrap for an opted-in workspace, creating its pod if needed. `undefined` means run locally.
+// Returns the wrap for an opted-in workspace, creating its sandbox if needed. `undefined` means run locally.
 export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap | undefined> {
   if (!input.workspaceId) return undefined;
   const c = await deps.configuration();
-  if (!optedIn(c, input.workspaceId)) return undefined;
+  const workspace = c.workspaces.find(({ id }) => id === input.workspaceId);
+  if (!workspace) return undefined;
   // A wrap from another plugin wins: Paseo rejects two different wraps.
   if (input.wrap) return undefined;
-  let pod: string;
-  const mode = modeOf(c, input.workspaceId);
+  if (!isConfigured(c)) throw new Error("Set the controller URL and token file in Kubernetes Sandbox.");
+  if (!workspace.profile) throw new Error("Choose a profile for this workspace in Kubernetes Sandbox.");
   let repo: RepoInfo;
   try {
     repo = await (deps.repo ?? resolveRepo)(input.cwd);
@@ -40,31 +39,17 @@ export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap 
   }
   try {
     if (input.reuseOnly) {
-      const name = podName(input.workspaceId);
-      if (!(await listPods(deps.kubectl(c))).some((p) => p.name === name && p.ready)) return undefined;
-      pod = name;
+      const sandbox = await (deps.status ?? getSandbox)(c, input.workspaceId);
+      if (!sandbox?.ready || sandbox.deleting || sandbox.profile !== workspace.profile) return undefined;
     } else {
-      pod = await withTimeout(
-        ensurePod(deps.kubectl(c), c, input.workspaceId, repo),
-        deps.startTimeoutMs ?? 25_000,
-        "The sandbox pod is still starting. Try again in a moment.",
-      );
+      await (deps.ensure ?? ensureSandbox)({ ...c, profile: workspace.profile }, input.workspaceId, { root: repo.root, gitDir: repo.gitDir }, { timeoutMs: deps.startTimeoutMs ?? 25_000 });
     }
   } catch (e) {
     // Fail the launch: running unwrapped would silently leave the sandbox.
-    throw new Error(`Kubernetes Sandbox could not start the pod: ${e instanceof Error ? e.message : "unknown error"}`);
+    throw new Error(`Kubernetes Sandbox could not start the sandbox: ${e instanceof Error ? e.message : "unknown error"}`);
   }
-  return buildWrap(c, pod, {
-    cwd: podCwd(c, mode, repo, input.cwd),
+  return buildWrap(c, input.workspaceId, {
+    cwd: input.cwd,
     envNames: forwardableEnv(input.env),
-    ...(deps.launcher ? { launcher: deps.launcher } : {}),
   });
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

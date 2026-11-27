@@ -1,140 +1,55 @@
-import type { PaseoApi } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { execFile } from "node:child_process";
-import { clusterCheck, clusterContexts, podsDelete, podsList, podsLogs, sshRemove, sshStatus, sshSync, workspacesList } from "./shared/contracts.js";
-import { modeOf, optedIn, sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
-import { podName } from "./shared/sandbox.js";
-import { connection, kubectlBinary, listContexts } from "./server/kubectl.js";
-import { checkCluster } from "./server/cluster.js";
-import { deleteClonePvc, deletePod, listPodsWithUsage, podLogs, sweep } from "./server/pods.js";
-import { removeSsh, sshStatus as readSshStatus, syncSsh } from "./server/ssh.js";
+import { controllerCheck, sandboxStop, workspacesList, type SandboxState } from "./shared/contracts.js";
+import { isConfigured, optedIn, sandboxSettings, settingsSchema, type Configuration } from "./shared/settings.js";
+import { getSandbox, health, profiles, stopSandbox, type SandboxStatus } from "./server/controller.js";
+import { checkController } from "./server/check.js";
 import { wrapFor, type HookDeps } from "./server/hooks.js";
 
-const SWEEP_MS = 60_000;
-
-const clientVersion = () =>
-  new Promise<string>((resolve, reject) =>
-    execFile(kubectlBinary(), ["version", "--client", "-o", "json"], { timeout: 10_000 }, (error, stdout) => {
-      if (error) return reject(error);
-      try {
-        resolve(String(JSON.parse(stdout).clientVersion?.gitVersion ?? "kubectl"));
-      } catch {
-        resolve("kubectl");
-      }
-    }),
-  );
+function state(sandbox: SandboxStatus): SandboxState {
+  if (!sandbox) return "absent";
+  if (sandbox.deleting) return "stopping";
+  if (sandbox.phase === "Failed" || sandbox.phase === "Succeeded") return "failed";
+  return sandbox.ready ? "running" : "starting";
+}
 
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(sandboxSettings);
   async function configuration(): Promise<Configuration> {
-    const state = await settings.read();
-    if (state.status !== "ready") throw new Error("Kubernetes Sandbox settings are invalid. Open Kubernetes Sandbox to fix them.");
-    return settingsSchema.parse(state.values);
+    const result = await settings.read();
+    if (result.status !== "ready") throw new Error("Kubernetes Sandbox settings are invalid. Open Kubernetes Sandbox to fix them.");
+    return settingsSchema.parse(result.values);
   }
-  const deps: HookDeps = { configuration, kubectl: (c) => connection(c) };
+  const deps: HookDeps = { configuration };
 
-  // The daemon API is only handed to hooks and RPC handlers: remember it for the background sweep.
-  let active: PaseoApi | undefined;
-  let swept = false;
-  const attach = (paseo: PaseoApi) => {
-    active = paseo;
-  };
-  async function knownWorkspaces(paseo: PaseoApi) {
-    const list = await paseo.workspaces.list();
-    return new Set(list.entries.map((w) => w.id));
-  }
-  async function runSweep() {
-    if (!active) return;
-    const c = await configuration();
-    // First sweep after the plugin starts also removes pods of workspaces that no longer exist.
-    const known = swept ? undefined : await knownWorkspaces(active);
-    const run = connection(c);
-    // Pick up a changed key file (compares hashes; the content is never logged).
-    await syncSsh(run, c).catch(() => console.error("Kubernetes Sandbox could not sync the SSH Secret; check the key file and RBAC."));
-    await sweep(run, c, known ? { knownWorkspaces: known } : {});
-    swept = true;
-  }
-  let sweeping = false;
-  const timer = setInterval(() => {
-    if (sweeping) return;
-    sweeping = true;
-    runSweep()
-      .catch(() => console.error("Kubernetes Sandbox sweep failed; check kubectl access. Retrying."))
-      .finally(() => (sweeping = false));
-  }, SWEEP_MS);
-  timer.unref();
-
-  server.handle(clusterCheck, async (_, { paseo }) => {
-    attach(paseo);
-    const c = await configuration();
-    return checkCluster(c, connection(c), clientVersion);
-  });
-  server.handle(clusterContexts, async (_, { paseo }) => {
-    attach(paseo);
-    return { contexts: await listContexts(await configuration()) };
-  });
-  server.handle(podsList, async (_, { paseo }) => {
-    attach(paseo);
-    const c = await configuration();
-    return { pods: await listPodsWithUsage(connection(c)) };
-  });
-  server.handle(podsDelete, async ({ name }, { paseo }) => {
-    attach(paseo);
-    const c = await configuration();
-    const run = connection(c);
-    await deletePod(run, name);
-    return { pods: await listPodsWithUsage(run) };
-  });
-  server.handle(podsLogs, async ({ name }) => {
-    const c = await configuration();
-    return { text: await podLogs(connection(c), name) };
-  });
-  server.handle(sshStatus, async () => {
-    const c = await configuration();
-    return readSshStatus(connection(c), c);
-  });
-  server.handle(sshSync, async () => {
-    const c = await configuration();
-    if (c.ssh.keyFile === "") throw new Error("Set an SSH key file and a known_hosts file first.");
-    const run = connection(c);
-    await syncSsh(run, c);
-    return readSshStatus(run, c);
-  });
-  server.handle(sshRemove, async () => {
-    const c = await configuration();
-    const run = connection(c);
-    await removeSsh(run);
-    return readSshStatus(run, c);
-  });
+  server.handle(controllerCheck, async (connection) => checkController(connection, { health, profiles }));
   server.handle(workspacesList, async (_, { paseo }) => {
-    attach(paseo);
     const c = await configuration();
     const list = await paseo.workspaces.list();
-    return {
-      workspaces: list.entries.map((w) => ({
-        id: w.id,
-        name: w.name,
-        directory: w.workspaceDirectory ?? w.projectRootPath,
-        optedIn: optedIn(c, w.id),
-        mode: modeOf(c, w.id),
-        pod: podName(w.id),
-      })),
-    };
+    const rows = await Promise.all(
+      list.entries.map(async (w) => {
+        const on = optedIn(c, w.id);
+        const sandbox = on && isConfigured(c) ? await getSandbox(c, w.id).then(state, () => "unknown" as const) : "absent" as const;
+        return { id: w.id, name: w.name, directory: w.workspaceDirectory ?? w.projectRootPath, sandbox };
+      }),
+    );
+    return { workspaces: rows };
+  });
+  server.handle(sandboxStop, async ({ workspaceId }) => {
+    const c = await configuration();
+    await stopSandbox(c, workspaceId);
+    return {};
   });
 
   const removers = [
-    server.addHook("agent.open.before", async ({ request }, { paseo }) => {
-      attach(paseo);
+    server.addHook("agent.open.before", async ({ request }) => {
       const wrap = await wrapFor(deps, { workspaceId: request.workspaceId, cwd: request.cwd, env: request.env, wrap: request.wrap });
       return wrap ? { ...request, wrap } : undefined;
     }),
-    server.addHook("terminal.create.before", async ({ request }, { paseo }) => {
-      attach(paseo);
+    server.addHook("terminal.create.before", async ({ request }) => {
       const wrap = await wrapFor(deps, { workspaceId: request.workspaceId, cwd: request.cwd, env: request.env, wrap: request.wrap });
       return wrap ? { ...request, wrap } : undefined;
     }),
-    server.addHook("command.run.before", async ({ request }, { paseo }) => {
-      attach(paseo);
+    server.addHook("command.run.before", async ({ request }) => {
       const wrap = await wrapFor(deps, {
         workspaceId: request.workspaceId,
         cwd: request.cwd,
@@ -146,18 +61,13 @@ export default function contribute(server: PluginServerContext) {
     }),
     server.addHook("workspace.archive.after", async ({ workspace }) => {
       const c = await configuration();
-      if (!optedIn(c, workspace.id)) return;
-      const run = connection(c);
-      await run(["delete", "pod", podName(workspace.id), "--wait=false", "--ignore-not-found"])
-        .then(() => deleteClonePvc(run, workspace.id))
-        .catch(() => {
-        console.error("Kubernetes Sandbox could not delete the pod of an archived workspace; it will be swept later.");
+      if (!optedIn(c, workspace.id) || !isConfigured(c)) return;
+      await stopSandbox(c, workspace.id).catch(() => {
+        console.error("Kubernetes Sandbox could not delete the sandbox of an archived workspace; the idle timeout will remove it.");
       });
     }),
   ];
-
   return () => {
-    clearInterval(timer);
     for (const remove of removers) remove();
   };
 }

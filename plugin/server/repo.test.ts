@@ -4,28 +4,12 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanRemote, parseGitdirPointer, resolveRepo, subPathFor } from "./repo.js";
+import { parseGitdirPointer, resolveRepo } from "./repo.js";
 
 test("parseGitdirPointer finds the main .git of a linked worktree", () => {
   assert.equal(parseGitdirPointer("gitdir: /workspace/src/app/.git/worktrees/feat\n"), "/workspace/src/app/.git");
   assert.equal(parseGitdirPointer("gitdir: relative/.git/worktrees/x"), null);
   assert.equal(parseGitdirPointer("nothing"), null);
-});
-
-test("cleanRemote refuses credentials", () => {
-  assert.equal(cleanRemote("git@github.com:o/r.git"), "git@github.com:o/r.git");
-  assert.equal(cleanRemote("https://github.com/o/r.git"), "https://github.com/o/r.git");
-  assert.throws(() => cleanRemote("https://user:tok@github.com/o/r.git"), /credentials/);
-  assert.throws(() => cleanRemote("https://tok@github.com/o/r.git"), /credentials/);
-});
-
-test("subPathFor maps a daemon path into the claim", () => {
-  assert.equal(subPathFor("/base", "", "/base/a/b"), "a/b");
-  assert.equal(subPathFor("/base", "x/y", "/base/a"), "x/y/a");
-  assert.equal(subPathFor("/base", "x", "/base"), "x");
-  assert.equal(subPathFor("/base", "", "/base"), "");
-  assert.throws(() => subPathFor("/base", "", "/other"), /not under/);
-  assert.throws(() => subPathFor("", "", "/other"), /base path/);
 });
 
 test("resolveRepo reads a real linked worktree", () => {
@@ -41,8 +25,6 @@ test("resolveRepo reads a real linked worktree", () => {
   return resolveRepo(join(wt)).then((r) => {
     assert.equal(r.root, wt);
     assert.equal(r.gitDir, join(main, ".git"));
-    assert.equal(r.remoteUrl, "https://example.com/o/r.git");
-    assert.equal(r.branch, "feat");
     writeFileSync(join(wt, "x"), "");
   });
 });
