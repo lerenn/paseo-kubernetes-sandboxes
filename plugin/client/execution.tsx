@@ -16,7 +16,7 @@ export function ExecutionField() {
       title="Execution"
       icon="Server"
       value={selected === "local" ? { id: "local", label: "Local" } : selected
-        ? { id: `profile:${selected.profile}`, label: label ?? selected.profile } : null}
+        ? { id: `profile:${selected.profile}`, label: label ?? (selected.profile === "docker" ? "Docker" : selected.profile) } : null}
       search={async ({ query }) => {
         const { localAllowed, profiles, connectionId, error } = await options({});
         const items = [
@@ -26,7 +26,7 @@ export function ExecutionField() {
           ...(connectionId ? profiles.map((profile) => ({
             id: `profile:${profile.id}`,
             label: profile.label,
-            description: profile.privileged ? "Privileged" : undefined,
+            description: profile.description,
             selection: { connectionId, profile: profile.id, privileged: profile.privileged },
           })) : []),
         ].filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()));

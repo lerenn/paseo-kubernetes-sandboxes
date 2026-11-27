@@ -29,6 +29,7 @@
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/installation-values.example.yaml">Shared installation values</a></p>
     <p>For an existing direct installation, verify Gateway profiles and HTTP/2, stop old sandboxes and migrate the saved assignments in the upgraded plugin. Retire direct access after the cutover is verified.</p>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#upgrade-from-direct-connections">Staged upgrade procedure</a></p>
+    <p>Set <code>gateway.backends.&lt;id&gt;.clusterDisplayName</code> in the shared Helm values to show that backend’s cluster name in the Execution picker. The Gateway returns the name with profiles authorized for the host. Without a name, the picker shows “Runs on a Kubernetes cluster”.</p>
     <h2 id="connection">Gateway settings</h2>
     <p>Each Paseo daemon uses a single Gateway connection. Paths refer to files on the daemon host or inside its container.</p>
     <dl><dt>HTTPS URL</dt><dd>Private HTTPS origin reachable from the Paseo daemon. The route must support HTTP/2 streams.</dd>

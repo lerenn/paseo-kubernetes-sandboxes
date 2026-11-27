@@ -20,7 +20,13 @@ function gatewayPolicy(config) {
     const url = new URL(backend.url);
     requireConfig(id.test(name) && url.href === `${url.origin}/` && url.protocol === "https:",
       "Each backend requires an ID and an HTTPS origin.");
-    backends.set(name, { origin: url.origin, caFile: backend.caFile ?? "/credentials/ca.crt" });
+    const clusterDisplayName = typeof backend.clusterDisplayName === "string"
+      ? backend.clusterDisplayName.trim() : backend.clusterDisplayName;
+    requireConfig(clusterDisplayName === undefined ||
+      (typeof clusterDisplayName === "string" && clusterDisplayName.length <= 80 &&
+        /^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u.test(clusterDisplayName)),
+    "Each backend clusterDisplayName must be a display name of 1–80 characters.");
+    backends.set(name, { origin: url.origin, caFile: backend.caFile ?? "/credentials/ca.crt", clusterDisplayName });
   }
 
   const routes = new Map();
@@ -218,7 +224,9 @@ export function createGateway({ config, state, tls, load = readFileSync }) {
         const profiles = [];
         for (const route of principal.allowed.values()) {
           const profile = listed(results.get(route.backend) ?? [], route);
-          if (profile) profiles.push({ ...profile, id: route.alias, controller: route.backend });
+          if (profile) profiles.push({
+            ...profile, id: route.alias, controller: route.backend, clusterDisplayName: route.clusterDisplayName,
+          });
         }
         return send(response, 200, { profiles });
       }

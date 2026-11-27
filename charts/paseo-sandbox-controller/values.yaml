@@ -41,6 +41,7 @@ gateway:
   # Existing, dedicated PVC. Use ReadWriteOncePod and retain across deployment changes.
   stateClaimName: ""
   # backend ID -> {url: HTTPS origin, caFile: /credentials/<key> (optional, defaults to /credentials/ca.crt)}
+  # Optional clusterDisplayName on each backend labels authorized profiles in the Execution picker.
   backends: {}
   # public profile alias -> {backend: backend ID, profile: controller profile ID, privileged: boolean}
   profiles: {}

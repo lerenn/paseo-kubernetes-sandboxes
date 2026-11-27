@@ -5,7 +5,7 @@ import { getSandbox, health, profiles, stopSandbox, type SandboxStatus } from ".
 import { checkController } from "./server/check.js";
 import { wrapFor, type LaunchInput } from "./server/hooks.js";
 
-import { executionChoice, executionKey, withWorkspaceExecution } from "./shared/execution.js";
+import { executionChoice, executionKey, executionProfiles, withWorkspaceExecution } from "./shared/execution.js";
 import type { PaseoApi } from "@getpaseo/client";
 import { checkRoutingChange } from "./server/routing.js";
 
@@ -79,7 +79,7 @@ export default function contribute(server: PluginServerContext) {
     try {
       const allowed = await profiles(gateway, 5_000);
       return {
-        localAllowed, connectionId: gateway.id, profiles: allowed,
+        localAllowed, connectionId: gateway.id, profiles: executionProfiles(allowed),
         ...(!allowed.length && { error: "This host’s Gateway credential has no authorized profiles." }),
       };
     } catch {
