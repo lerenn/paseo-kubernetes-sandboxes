@@ -1,0 +1,105 @@
+{{- if .Values.gateway.enabled }}
+{{- $name := printf "%s-sandbox-gateway" (.Release.Name | trunc 47 | trimSuffix "-") }}
+{{- $gateway := .Values.gateway }}
+{{- $config := dict "backends" (required "Configure gateway.backends." $gateway.backends) "profiles" (required "Configure gateway.profiles." $gateway.profiles) "principals" (required "Configure gateway.principals." $gateway.principals) | toJson }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  config.json: {{ $config | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+      annotations:
+        checksum/config: {{ $config | sha256sum | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: {{ default (printf "%s:v%s" .Values.imageRepository .Chart.AppVersion) .Values.image | quote }}
+          args: ["gateway.mjs"]
+          command: ["node"]
+          env:
+            - name: GATEWAY_CONFIG
+              value: /config/config.json
+            - name: GATEWAY_STATE
+              value: /state
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              port: https
+              path: /healthz
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $gateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: credentials
+              mountPath: /credentials
+              readOnly: true
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tls
+          secret:
+            secretName: {{ required "Set gateway.tlsSecretName." $gateway.tlsSecretName | quote }}
+        - name: credentials
+          secret:
+            secretName: {{ required "Set gateway.credentialsSecretName." $gateway.credentialsSecretName | quote }}
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ required "Set gateway.stateClaimName." $gateway.stateClaimName | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+{{- end }}

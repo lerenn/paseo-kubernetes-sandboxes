@@ -13,7 +13,8 @@
 <div class="doc">
 <aside class="sidebar"><details class="toc-mobile" open><summary>On this page</summary><nav aria-label="On this page">
     <a href="#controller-install">Controller installation</a>
-    <a href="#connection">Named controller connections</a>
+    <a href="#gateway-install">Sandbox Gateway installation</a>
+    <a href="#connection">Connections</a>
     <a href="#profiles">Helm profiles</a>
     <a href="#tokens">Scoped tokens</a>
     <a href="#workspace-status">Workspace status</a>
@@ -24,13 +25,19 @@
     <p>Prepare your namespace, shared storage and controller values before installing. Use the example values and the administrator instructions for routing, TLS and token provisioning.</p>
   <pre><code>helm upgrade --install sandbox \
   oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller \
-  --version 0.5.2 --namespace paseo-sandboxes --create-namespace \
+  --version 0.5.7 --namespace paseo-sandboxes --create-namespace \
   --values controller-values.yaml --wait</code></pre>
     <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#administrator-setup">Detailed administrator setup</a></p>
-    <h2 id="connection">Named controller connections</h2>
-    <p>Give each controller a name and a stable ID. Each connection has its own HTTPS origin, token and CA settings. Use <code>standard</code> for the default connection.</p>
-    <dl><dt>Controller URL</dt><dd>Private HTTPS origin reachable from the Paseo daemon. The route must support HTTP/2 streams.</dd>
-    <dt>Token file</dt><dd>Absolute daemon path to the raw controller token.</dd>
+    <h2 id="gateway-install">Sandbox Gateway installation</h2>
+    <p>Deploy the gateway in a separate release of the same chart with <code>controller.enabled: false</code> and <code>gateway.enabled: true</code>. Set <code>gateway.tlsSecretName</code> to an existing TLS Secret for the gateway hostname, <code>gateway.credentialsSecretName</code> to an existing Secret containing backend tokens and private CAs, and <code>gateway.stateClaimName</code> to a dedicated persistent volume claim. Use ReadWriteOncePod storage and retain the claim across upgrades and restarts.</p>
+    <p>Set <code>gateway.backends</code> to stable controller IDs, HTTPS origins and optional CA files under <code>/credentials</code>. Under <code>gateway.profiles</code>, assign a stable public alias to each backend profile and declare whether it is privileged. Distinct aliases let two controllers offer the same backend profile ID. Use the unprivileged alias <code>standard</code> for the default profile.</p>
+    <p>Under <code>gateway.principals</code>, configure a distinct gateway token digest, the allowed aliases and the token files for their controllers. Issue a dedicated controller principal and token for each gateway principal and backend, scoped to the intended backend profiles. Keep those principal IDs stable when rotating tokens. Restart the gateway deployment to pick up Secret changes. Stop affected sandboxes before removing grants or changing a route or controller identity.</p>
+    <p>The gateway Service is private. Route the daemon to its HTTPS endpoint over a network path that preserves bidirectional HTTP/2 streams. Give the user the gateway URL, their gateway token and the gateway CA when needed. Controller credentials stay mounted in the gateway.</p>
+    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/gateway-values.example.yaml">Example gateway values</a></p>
+    <h2 id="connection">Connections</h2>
+    <p>Give each controller or gateway connection a name and a stable ID. The Type column shows the detected endpoint type after the HTTPS check. Profiles identifies the backing controller for each gateway profile. Each connection has its own HTTPS origin, token and CA settings. Use <code>standard</code> for the default connection.</p>
+    <dl><dt>HTTPS URL</dt><dd>Private HTTPS origin reachable from the Paseo daemon. The route must support HTTP/2 streams.</dd>
+    <dt>Token file</dt><dd>Absolute daemon path to the raw endpoint token.</dd>
     <dt>CA file</dt><dd>Absolute daemon path to the CA certificate for a private TLS endpoint. Leave empty to use system trust.</dd>
     </dl>
     <h2 id="profiles">Helm profiles</h2>
@@ -42,7 +49,7 @@
     <h2 id="tokens">Scoped tokens</h2>
     <p>Each principal has a distinct <code>tokenSha256</code> and a list of allowed profiles. Sandbox identity also includes the principal and the workspace ID.</p>
     <h2 id="workspace-status">Workspace status</h2>
-    <p>Enable a workspace and save a connection and one of its authorized profiles to send new launches to Kubernetes. Profile IDs are scoped to the connection. New opt-ins preselect Standard when available on the default connection. Select Docker (privileged) explicitly on the dedicated Docker connection. <strong>Refresh status</strong> shows whether the pod is starting, running, stopping, failed or absent. <strong>Stop sandbox</strong> requests deletion while keeping the workspace opted in. Confirm the stop and wait for the pod to disappear before changing the connection or profile. Deletion ends running processes and discards ephemeral state.</p>
+    <p>Enable a workspace and save a connection and one of its authorized profiles to send new launches to Kubernetes. Profile IDs are scoped to the connection. New opt-ins preselect Standard when available on the default connection. Select Docker (privileged) explicitly on a connection authorized for it. <strong>Refresh status</strong> shows whether the pod is starting, running, stopping, failed or absent. <strong>Stop sandbox</strong> requests deletion while keeping the workspace opted in. Confirm the stop and wait for the pod to disappear before changing the connection or profile. Deletion ends running processes and discards ephemeral state.</p>
   </main>
 </div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>

@@ -15,7 +15,7 @@ test("checks credential files independently before making controller requests", 
   const connection = { controllerUrl: "https://sandbox.example.internal", tokenFile, caFile };
   const calls: string[] = [];
   const api = {
-    health: async () => { calls.push("health"); },
+    health: async () => { calls.push("health"); return {}; },
     profiles: async () => { calls.push("profiles"); return []; },
   };
   const statuses = async (caPath = caFile) => {
@@ -35,7 +35,6 @@ test("checks credential files independently before making controller requests", 
   assert.deepEqual(calls, ["health", "profiles", "health", "profiles"]);
 });
 
-
 test("profile discovery keeps resource metadata optional and preserves configured quantities", () => {
   const profile = { id: "standard", label: "Standard", privileged: false };
   assert.deepEqual(sandboxProfile.parse(profile), profile);
@@ -44,4 +43,15 @@ test("profile discovery keeps resource metadata optional and preserves configure
     resources: [{ kind: "main", name: "main", requests: { cpu: "250m", "ephemeral-storage": "1Gi" }, limits: {} }],
   };
   assert.deepEqual(sandboxProfile.parse(withResources), withResources);
+});
+
+test("detects gateways and falls back to controllers for older health responses", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "sandbox-check-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const tokenFile = join(directory, "token");
+  await writeFile(tokenFile, "token-secret");
+  const connection = { controllerUrl: "https://sandbox.example.internal", tokenFile, caFile: "" };
+  const profiles = async () => [];
+  assert.equal((await checkController(connection, { health: async () => ({}), profiles })).type, "controller");
+  assert.equal((await checkController(connection, { health: async () => ({ type: "gateway" }), profiles })).type, "gateway");
 });

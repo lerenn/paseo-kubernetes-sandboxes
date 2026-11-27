@@ -1,3 +1,4 @@
+{{- if .Values.controller.enabled }}
 {{- $name := printf "%s-sandbox-controller" .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- $tlsName := default (printf "%s-tls" $name) .Values.tlsSecretName }}
 {{- if not .Values.tlsSecretName }}
@@ -149,3 +150,4 @@ spec:
     - name: https
       port: 443
       targetPort: https
+{{- end }}

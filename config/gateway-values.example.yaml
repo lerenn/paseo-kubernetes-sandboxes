@@ -1,0 +1,35 @@
+controller:
+  enabled: false
+gateway:
+  enabled: true
+  tlsSecretName: gateway-tls
+  credentialsSecretName: gateway-backend-credentials
+  stateClaimName: gateway-state
+  backends:
+    standard-controller:
+      url: https://standard-controller.standard.svc
+      caFile: /credentials/standard-ca.crt
+    docker-controller:
+      url: https://docker-controller.docker.svc
+      caFile: /credentials/docker-ca.crt
+  profiles:
+    standard:
+      backend: standard-controller
+      profile: standard
+      privileged: false
+    docker:
+      backend: docker-controller
+      profile: docker
+      privileged: true
+  principals:
+    developer:
+      tokenSha256: "REPLACE_WITH_GATEWAY_TOKEN_SHA256"
+      profiles: [standard]
+      backendTokenFiles:
+        standard-controller: /credentials/developer-standard.token
+    docker-developer:
+      tokenSha256: "REPLACE_WITH_DISTINCT_GATEWAY_TOKEN_SHA256"
+      profiles: [standard, docker]
+      backendTokenFiles:
+        standard-controller: /credentials/docker-developer-standard.token
+        docker-controller: /credentials/docker-developer-docker.token

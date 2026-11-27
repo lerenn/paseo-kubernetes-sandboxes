@@ -99,7 +99,7 @@ const server = createSecureServer({
   minVersion: "TLSv1.2",
 }, async (request, response) => {
   const path = request.url;
-  if (request.method === "GET" && path === "/healthz") return send(response, 200, { ok: true });
+  if (request.method === "GET" && path === "/healthz") return send(response, 200, { ok: true, type: "controller" });
   const principal = policy.authenticate(request.headers.authorization);
   if (!principal) return send(response, 401, { error: "Authentication required." });
   if (request.method === "GET" && path === "/v1/profiles") {

@@ -57,6 +57,8 @@ jobs:
       - run: |
           helm lint charts/paseo-sandbox-controller -f config/controller-values.example.yaml
           helm template sandbox charts/paseo-sandbox-controller -f config/controller-values.example.yaml
+          helm lint charts/paseo-sandbox-controller -f config/gateway-values.example.yaml
+          helm template gateway charts/paseo-sandbox-controller -f config/gateway-values.example.yaml
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
       - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
   version:
