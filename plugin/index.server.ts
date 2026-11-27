@@ -25,7 +25,7 @@ export default function contribute(server: PluginServerContext) {
   let save: { revision: string; expires: number } | undefined;
   let routingOperations = 0;
   async function launch(input: LaunchInput) {
-    if (!input.workspaceId || input.wrap) return undefined;
+    if (!input.workspaceId) return undefined;
     routingOperations++;
     try {
       if (save && save.expires > Date.now() && (await settings.read()).revision === save.revision) {
@@ -89,7 +89,13 @@ export default function contribute(server: PluginServerContext) {
 
   const removers = [
     server.addHook("agent.open.before", async ({ request }) => {
-      const wrap = await launch({ workspaceId: request.workspaceId, cwd: request.cwd, env: request.env, wrap: request.wrap });
+      const wrap = await launch({
+        workspaceId: request.workspaceId,
+        cwd: request.cwd,
+        env: request.env,
+        wrap: request.wrap,
+        allowUnassigned: request.purpose === "history",
+      });
       return wrap ? { ...request, wrap } : undefined;
     }),
     server.addHook("terminal.create.before", async ({ request }) => {

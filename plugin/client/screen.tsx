@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { z } from "zod";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { ExternalLink, Icon, Loading, ScrollView } from "@getpaseo/plugin/client/ui";
+import { ExternalLink, Icon, Loading, ScrollView, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
 import {
@@ -198,6 +198,12 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
+          {tab === "connection" && <Card theme={theme} icon="Shield" title="Execution policy" description="Applies to new launches on this Paseo host.">
+            <SettingsSwitch label="Require a sandbox profile"
+              hint="Require an authorized profile for workspace agent sessions, terminals and setup commands. Existing sessions and unassigned workspace history and teardown stay available."
+              value={config.requireSandboxProfile} disabled={busy || settings.status !== "ready"}
+              onValueChange={(required) => void action(() => save({ ...config, requireSandboxProfile: required }))} />
+          </Card>}
           {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
             {config.connections.length > 0 && (
               <View role="table" accessibilityLabel="Saved controller connections" style={tableFrame}>
@@ -337,7 +343,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   <Text style={{ color: theme.colors.foreground, fontWeight: "600", fontSize: 16 }}>{row.name}</Text>
                   <Text style={text}>{row.directory}</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                    <Badge theme={theme} label={route ? statusLabels[row.sandbox] : "Runs on daemon"}
+                    <Badge theme={theme} label={route ? statusLabels[row.sandbox] : config.requireSandboxProfile ? "Profile required" : "Runs on daemon"}
                       tone={row.sandbox === "running" ? "success" : "muted"} />
                     {route && <Badge theme={theme} label={route.connection.name} />}
                     {chosen && <Badge theme={theme} label={chosen.label} tone={chosen.privileged ? "warning" : "muted"} />}
@@ -356,7 +362,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                       <Button theme={theme} label="Stop sandbox" disabled={busy || !isConfigured(route.connection)}
                         onPress={() => { setSelection(null); if (revision) setConfirmation({ id: row.id, revision }); }} />
                     )}
-                    {route && !hasSandbox && !choosing && (
+                    {route && !hasSandbox && !choosing && !config.requireSandboxProfile && (
                       <Button theme={theme} label="Disable sandbox" disabled={busy}
                         onPress={() => void action(() => save({ ...config, workspaces: config.workspaces.filter(({ id }) => id !== row.id) }))} />
                     )}
