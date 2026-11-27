@@ -46,10 +46,10 @@ Each controller accepts only its configured principals and profiles, scopes pod 
 5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.2/paseo-sandbox-controller-0.6.2.tgz
-   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.2 -n paseo --wait
-   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.2 -n standard --wait
-   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.2 -n docker --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.3/paseo-sandbox-controller-0.6.3.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.3 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.3 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.3 -n docker --wait
    ```
 
    For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
@@ -76,9 +76,11 @@ Create `gateway-auth-header.txt` with mode 0600 and the line `Authorization: Bea
 
 The controller names and owns sandbox pods per release, principal and workspace. It deletes a pod when the workspace is archived or stopped. An idle pod is eligible for deletion after the profile's `idleMinutes` interval, measured from its last launch or command completion. Open terminals and active commands keep the pod alive. Set `idleMinutes: 0` to retain idle pods until explicitly deleted. The controller scans once a minute and restarts the idle clock on rollout. Deleting the Helm release's Service also garbage-collects its sandbox pods. PersistentVolumeClaims pre-exist the chart and retain the worktrees.
 
+Set `gateway.backends.<id>.clusterDisplayName` in the shared installation values to show that backend’s cluster in the Execution picker. Backends in the same cluster can share a name. The picker shows “Runs on a Kubernetes cluster” if the Gateway does not supply a name.
+
 ## Paseo user setup
 
-1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.2`.
+1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.3`.
 2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
 3. In **New workspace**, choose the host and open **Execution**. Select **Local** where permitted, or choose a Gateway profile from the selected host. Choose **Docker** explicitly for workspaces that need its privileged container. The selected profile applies before setup or the first agent starts.
 4. To route an existing workspace, open **Kubernetes Sandbox → Workspaces** and save a profile. If the first agent failed, return to the same workspace draft and retry after the profile is saved. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.

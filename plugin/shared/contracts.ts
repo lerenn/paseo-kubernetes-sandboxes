@@ -25,6 +25,7 @@ export const sandboxProfile = z.object({
     limits: quantities,
   })).optional(),
   controller: z.string().optional(),
+  clusterDisplayName: z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u).optional().catch(undefined),
 });
 export type SandboxProfile = z.infer<typeof sandboxProfile>;
 
@@ -73,7 +74,7 @@ export const executionOptions = defineRpc({
   output: z.object({
     localAllowed: z.boolean(),
     connectionId: profileId.optional(),
-    profiles: z.array(sandboxProfile),
+    profiles: z.array(sandboxProfile.pick({ id: true, label: true, privileged: true }).extend({ description: z.string() })),
     error: z.string().optional(),
   }),
 });

@@ -14,8 +14,10 @@ releases:
       backends:
         standard-controller:
           url: https://standard-sandbox-controller.standard.svc
+          # clusterDisplayName: Standard cluster display name
         docker-controller:
           url: https://docker-sandbox-controller.docker.svc
+          # clusterDisplayName: Docker cluster display name
       profiles:
         standard:
           backend: standard-controller

@@ -106,8 +106,8 @@ async function fixture(t, { commandFixture = false } = {}) {
     return server;
   }
   const backends = {
-    safe: { url: await listen(backend("safe", false, ["alice", "bob"])), caFile: "ca" },
-    dind: { url: await listen(backend("dind", true, ["bob"])), caFile: "ca" },
+    safe: { url: await listen(backend("safe", false, ["alice", "bob"])), caFile: "ca", clusterDisplayName: "Standard Lab" },
+    dind: { url: await listen(backend("dind", true, ["bob"])), caFile: "ca", clusterDisplayName: "Docker Lab" },
   };
   const config = {
     backends,
@@ -165,12 +165,12 @@ test("gateway filters discovery and routes colliding backend profile IDs with du
   assert.deepEqual(await call("GET", "/healthz", "X"), [200, { ok: true, type: "gateway" }]);
   assert.equal((await call("GET", "/v1/profiles", "C"))[0], 401);
   const [, alice] = await call("GET", "/v1/profiles", "A");
-  assert.deepEqual(alice.profiles.map(({ id, controller }) => [id, controller]), [["standard", "safe"]]);
+  assert.deepEqual(alice.profiles.map(({ id, controller, clusterDisplayName }) => [id, controller, clusterDisplayName]), [["standard", "safe", "Standard Lab"]]);
   assert.equal((await call("PUT", path, "A", { profile: "docker" }))[0], 403);
   assert.equal((await call("PUT", path, "A", { profile: "standard", privileged: true }))[0], 409);
   assert.ok(accesses.every(([backend]) => backend === "safe"));
   const [, bob] = await call("GET", "/v1/profiles", "B");
-  assert.deepEqual(bob.profiles.map(({ id, controller }) => [id, controller]), [["standard", "safe"], ["docker", "dind"]]);
+  assert.deepEqual(bob.profiles.map(({ id, controller, clusterDisplayName }) => [id, controller, clusterDisplayName]), [["standard", "safe", "Standard Lab"], ["docker", "dind", "Docker Lab"]]);
   assert.equal((await call("PUT", path, "B", { profile: "docker" }))[1].sandbox.profile, "docker");
   assert.deepEqual(await call("GET", path, "A"), [200, { sandbox: null }]);
   assert.equal((await call("DELETE", path, "A"))[0], 202);

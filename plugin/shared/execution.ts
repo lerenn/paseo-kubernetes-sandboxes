@@ -22,3 +22,16 @@ export function withWorkspaceExecution(
   }
   return { ...config, workspaces };
 }
+
+export function executionProfiles(
+  profiles: readonly { id: string; label: string; privileged: boolean; clusterDisplayName?: string }[],
+) {
+  return profiles.map(({ id, label, privileged, clusterDisplayName }) => ({
+    id,
+    label: id === "docker" ? label.replace(/\s*\(privileged\)$/i, "") : label,
+    privileged,
+    description: clusterDisplayName
+      ? `Runs on ${clusterDisplayName} Kubernetes cluster`
+      : "Runs on a Kubernetes cluster",
+  }));
+}
