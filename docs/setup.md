@@ -2,7 +2,7 @@
 
 ## Administrator setup
 
-Use a dedicated namespace on Kubernetes 1.34 or later. The Helm chart installs one controller, a ClusterIP Service, TLS configuration and a namespace-scoped Role. The Role lets the controller manage pods, open exec sessions and read its own Service. Paseo connects with a controller token and needs no Kubernetes credentials.
+Use Kubernetes 1.34 or later. A complete Helm installation requires one Gateway release and a Standard backend release. Deploy Docker as a separate backend release in a namespace approved for its privileged sidecar. Each backend controller manages its own pods through namespace-scoped RBAC. Expose the Gateway to Paseo over private HTTPS with bidirectional HTTP/2.
 
 ### Prepare shared storage and a profile
 
@@ -26,47 +26,47 @@ The sidecar runs privileged and shares the workspace's exact worktree mount path
 
 Docker requires a cluster and namespace that allow privileged containers. Give access only to trusted daemons and workspaces. A privileged sidecar has broad node access. Docker images, containers and volumes in this sandbox are discarded when the sandbox pod is deleted.
 
-For lab deployments, use a dedicated Docker controller and namespace with separate credentials and TLS trust. Configure a Docker-only principal and a PVC rooted at the approved lab storage directory. Provide a separately approved repository mapping if linked Git worktrees require it. Apply admission rules in the Docker namespace that restrict privileged containers to the controller-managed Docker sidecar and constrain the allowed images, PVCs and pod settings. The lab team owns the namespace, storage and admission policy.
+For lab deployments, use a dedicated Docker controller and namespace with separate storage and backend profile grants. Configure a Docker-only principal and a PVC rooted at the approved lab storage directory. Provide a separately approved repository mapping if linked Git worktrees require it. Apply admission rules in the Docker namespace that restrict privileged containers to the controller-managed Docker sidecar and constrain the allowed images, PVCs and pod settings. The lab team owns the namespace, storage and admission policy.
 
 Each controller accepts only its configured principals and profiles, scopes pod operations to its release, principal and workspace ID, and checks worktree and repository paths against profile mappings. The chart Role operates within its namespace. The dedicated controller needs the chart's existing namespace permissions. Test the lab policy against both the intended pod and rejected pod specs before enabling Docker workspaces.
 
-### Issue a scoped token
+### Install Gateway and backends
 
-Generate a distinct token for each daemon. Keep the raw token in a file readable only by the daemon identity, and configure its SHA-256 digest and permitted profiles in your values.
+1. Prepare shared storage in the backend namespaces and a dedicated, retained ReadWriteOncePod PVC in the Gateway namespace. Create the external Gateway serving TLS Secret for the hostname the daemon uses. A private route such as TLS passthrough must preserve bidirectional HTTP/2 and allow long-lived streams.
+2. Install cert-manager for managed internal TLS. Set `internalTLS.issuerName` to the same dedicated private ClusterIssuer name in every release. The Gateway release can create the issuer and its root with `internalTLS.bootstrap: true`. Its prerequisite is access to cert-manager's cluster resource namespace (default `cert-manager`) and to ClusterIssuers. Restrict issuance through the private issuer to this installation's operators and namespaces. In a shared cluster, use a managed issuer with issuance policy that reserves the Gateway DNS identity. Any client certificate issued with that identity by a trusted CA can act as the Gateway.
+3. Copy the values for [Gateway](../config/gateway-values.example.yaml), [Standard](../config/controller-values.example.yaml) and, if enabled, [Docker](../config/docker-values.example.yaml). Update the image and volume mappings, Service HTTPS names, Gateway serving Secret, and state claim. Use the same dedicated DNS SAN for `gateway.clientIdentity` and each matching backend principal's `gatewayIdentity`. Use one stable backend principal per Gateway principal per backend. Map each principal's allowed aliases with `gateway.principals.<name>.profiles` and map the backend IDs to stable principal names with `backendPrincipals`. Grant only the matching backend profiles in each controller's `principals` section.
+4. Generate one token per Paseo daemon. Place the raw token in a daemon-readable file, and set its digest as `gateway.principals.<name>.tokenSha256`. Grant `standard` and add `docker` only for authorized daemons. For a Standard-only installation, omit the Docker alias, backend and grants from the Gateway values.
 
-```sh
-umask 077
-openssl rand -hex 32 > controller.token
-tr -d '\n' < controller.token | sha256sum
-```
+   ```sh
+   umask 077
+   openssl rand -hex 32 > gateway.token
+   tr -d '\n' < gateway.token | sha256sum
+   ```
 
-Copy [the example values](../config/controller-values.example.yaml) and set the profile's image, claims and base paths. Replace the example token digest. Keep a principal name stable when rotating its token to retain access to that principal's existing pods. Change the digest with a Helm upgrade and replace the daemon's token file. A controller restart closes existing exec streams.
+5. Install the releases with the chart below. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
-### Install the chart
+   ```sh
+   chart=oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller
+   helm upgrade --install gateway "$chart" --version 0.6.0 -n paseo -f gateway-values.yaml --wait
+   helm upgrade --install standard "$chart" --version 0.6.0 -n standard -f standard-values.yaml --wait
+   helm upgrade --install docker "$chart" --version 0.6.0 -n docker -f docker-values.yaml --wait
+   ```
 
-```sh
-helm upgrade --install sandbox \
-  oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller \
-  --version 0.5.2 --namespace paseo-sandboxes --create-namespace \
-  --values controller-values.yaml --wait
-```
+   For a source build, use `charts/paseo-sandbox-controller` and set `image` to your build. Set `imagePullSecrets` for namespaces that need private registry access.
 
-For a source build, use `charts/paseo-sandbox-controller` as the chart path and set `image` to your controller image reference. For private registry packages, authenticate Helm before pulling the chart and create an image pull Secret in the namespace, and reference it in the controller chart's `imagePullSecrets`.
+The Gateway uses a dedicated internal client certificate. Controllers verify its CA and configured DNS SAN before accepting the asserted backend principal, and the Gateway verifies the CA and hostname of each controller. Cert-manager renews the serving and client certificates daily and rotates their keys. The Gateway reads new client material on each connection, and the servers reload mounted TLS material for new connections. The bootstrapped root is renewed with the same trust key. For a root key rollover, use operator-managed overlapping CA bundles and renew leaves under the replacement issuer before removing the old CA.
 
-The default endpoint for an in-cluster daemon is `https://sandbox-sandbox-controller.paseo-sandboxes.svc`. Export the chart-generated CA from the install context and place it on the daemon host.
+With externally managed PKI, supply the Gateway client Secret through `gateway.credentialsSecretName` with `tls.crt`, `tls.key` and backend trust `ca.crt`. Set `gateway.backends.<id>.caFile` when a backend needs a different CA key in that Secret. For each controller, provide a serving `tlsSecretName` and a `controller.gatewayClientCASecretName` containing the client CA at `ca.crt`. The Gateway serving Secret is separate and may use a publicly trusted certificate such as Let's Encrypt. Backend servers and client certificates use private trust.
 
-```sh
-kubectl -n paseo-sandboxes get secret sandbox-sandbox-controller-tls \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d > controller-ca.crt
-```
-
-For a daemon outside the cluster, use a private route to the Service, such as TLS passthrough on a private load balancer. With a custom hostname, set `tlsSecretName` to a Secret in the controller namespace containing `tls.crt` and `tls.key` for that hostname. Ensure intermediaries support bidirectional HTTP/2 streaming and allow long-lived terminal sessions. Restart the controller after replacing a custom TLS Secret in place.
-
-Verify the private route from the daemon before installing the plugin.
+From the daemon network verify Gateway HTTPS and authenticated HTTP/2 profile discovery. Expect HTTP 200 and each alias granted to that daemon. Use `--cacert` with a private Gateway serving CA.
 
 ```sh
-curl --cacert controller-ca.crt https://sandbox-sandbox-controller.paseo-sandboxes.svc/healthz
+curl --fail --http2 --write-out '\nHTTP/%{http_version}\n' \
+  --header @gateway-auth-header.txt \
+  https://sandbox.example.internal/v1/gateway/profiles
 ```
+
+Create `gateway-auth-header.txt` with mode 0600 and the line `Authorization: Bearer <gateway token>`. Remove it after verification. A Standard-only credential should see only `standard`; a dual-profile credential should see `standard` and `docker`. Rotate a Paseo token with a Gateway values update and replacement daemon token file at the same path. Keep Gateway and backend principal names to retain ownership.
 
 ### Lifecycle
 
@@ -74,17 +74,19 @@ The controller names and owns sandbox pods per release, principal and workspace.
 
 ## Paseo user setup
 
-1. Install the plugin from the release checkout on the daemon host with `paseo plugin install "$PWD/plugin"`. The manifest installs the plugin dependencies. Paseo 0.17.5 and Node.js 22 or later are supported.
-2. Open **Kubernetes Sandbox**, select **Add connection**, and save a name and stable connection ID. For each connection, enter its HTTPS origin, absolute daemon-local token path, and absolute daemon-local CA path if it uses a private CA. Use the ID `standard` for the default connection.
-3. Run **Check connection** to verify TLS, the token and its permitted profiles. In **Workspaces**, select **Enable sandbox**. Standard is preselected when authorized on the default connection. For Docker, select the dedicated Docker connection and explicitly select **Docker (privileged)**. The workspace saves the connection and profile together, so profile IDs can repeat on different controllers.
-4. Open a new terminal or start an agent. **Refresh status** shows the sandbox state. **Stop sandbox** terminates that workspace's current pod and sessions. A later launch recreates it while the workspace stays opted in. To change a connection or profile, first confirm **Stop and delete sandbox**, wait for **No sandbox**, then select **Change connection or profile**. Changes to a connection's endpoint or credential paths require its workspaces to have no pods. To rotate a token for the same principal, keep its file path and follow the rotation procedure above. Running processes and ephemeral state are lost on deletion. Shared worktree files are kept.
+1. Install on the daemon running Paseo 0.17.5 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.0`.
+2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
+3. Open **Workspaces → Enable sandbox** and save a profile. Standard is preselected when authorized. Choose **Docker (privileged)** explicitly for trusted workspaces that need it. The same token grants the profiles your administrator assigned.
+4. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.
 
-Existing sessions keep their launch location until reopened. Opted-in launches fail if their controller or storage is unavailable. Disabling the plugin removes its launch hooks. Preserve the plugin installation and opt-in settings if those workspaces must keep running in Kubernetes.
+Assigned workspace launches require the saved Gateway and its profile grant. To require a profile on new workspace launches, enable **Require a sandbox profile** in the Gateway tab.
 
-### Upgrade from 0.5.0 or 0.5.1
+### Upgrade from direct connections
 
-The existing endpoint and file paths migrate to the **Standard** connection. Workspace opt-ins and saved profiles stay attached to that connection. An opt-in awaiting a profile still needs a selection before launch. Existing controllers accept the new plugin's requests; controllers from this release also verify the profile on new exec requests.
+1. Keep both backend release names, namespaces, Services, storage and existing principal names. Back up the existing plugin configuration and inventory its workspace-to-profile assignments. Configure exact aliases and privilege for those assignments in Gateway. The Standard and Docker aliases are `standard` and `docker`.
+2. Keep the current plugin installed while staging the new Gateway and backends. For a short overlap, set `controller.allowDirectMigration: true` and keep the old `tokenSha256` grants alongside the Gateway identities. Keep the old serving certificate trusted by the old plugin for this step. With Helm, `controller.retainLegacyServingTLS: true` can retain a chart-generated Secret from the live release. With Argo, reference a separately managed copy of that Secret, and mount the corresponding backend serving CA with `gateway.backendTrustSecretName` and use `gateway.backends.<id>.caFile: /backend-trust/<key>`. The managed path can issue backend client trust material while the existing controller serving Secret remains in use. You can also drain first using the old releases, then deploy the new backend serving certificates and Gateway together during the maintenance window.
+3. Verify both scoped profiles through the Gateway from the daemon network and confirm HTTP/2. Pause new sandbox launches and stop old sandboxes with the old plugin. Wait for them to disappear before changing routes. Existing sessions must be reopened after the cutover. Shared worktree data remains available.
+4. Remove direct routes and old token digests, and turn off `controller.allowDirectMigration`. Confirm the Gateway still returns the expected profiles. Upgrade the existing plugin installation in place so it can read its existing host settings. Go to **Gateway → Migrate to Gateway**, enter the verified Gateway URL and token paths, then select **Migrate saved assignments**. The operation keeps every workspace ID and profile alias, and checks each assigned profile's privilege and grant before saving. Pending assignments still need a profile before launch. If the migration fails, fix the Gateway grants or aliases and retry with the settings still intact.
+5. Check **Workspaces** and **Profiles** after saving to verify that the assignments and scopes match the inventory. A rollback to direct connections requires restoring both the previous plugin version and backed-up host settings and infrastructure as a pair.
 
-### Upgrade from releases before 0.5
-
-Install the controller and prepare shared storage before upgrading the plugin. Existing opt-ins carry over by workspace ID. Choose a profile for each existing opt-in before launching again. For old clone-mode workspaces, preserve any pod-local changes and move the checkout to the shared storage before enabling launches. Earlier pods, legacy RBAC, SSH Secrets and per-sandbox PVCs were managed by the old plugin. Inventory them and review ownership and data retention before removing them. The controller adopts only its own pods.
+For pre-0.5 clone-mode workspaces, preserve pod-local changes and move the checkout to shared storage before enabling launches. Inventory earlier pods, RBAC, SSH Secrets and per-sandbox PVCs before removal.

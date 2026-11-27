@@ -1,45 +1,44 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { open, readFile, rename } from "node:fs/promises";
 import { connect, createSecureServer, constants } from "node:http2";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readTLS, reloadTLS, validateTLS } from "./tls.mjs";
 
 const id = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const tokenPattern = /^[A-Za-z0-9_-]{43,256}$/;
 const sandboxPath = (key, alias) => `/v1/sandboxes/gw-${digest(JSON.stringify([key, alias]))}`;
-
-class GatewayError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
 
 function requireConfig(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function gatewayPolicy(config, load) {
+function gatewayPolicy(config) {
   const backends = new Map();
   for (const [name, backend] of Object.entries(config.backends ?? {})) {
     const url = new URL(backend.url);
     requireConfig(id.test(name) && url.href === `${url.origin}/` && url.protocol === "https:",
       "Each backend requires an ID and an HTTPS origin.");
-    backends.set(name, { origin: url.origin, ca: backend.caFile ? load(backend.caFile) : undefined });
+    backends.set(name, { origin: url.origin, caFile: backend.caFile ?? "/credentials/ca.crt" });
   }
 
   const routes = new Map();
   for (const [alias, route] of Object.entries(config.profiles ?? {})) {
     const backend = backends.get(route.backend);
-    requireConfig(id.test(alias) && backend && id.test(route.profile) && typeof route.privileged === "boolean",
+    requireConfig(id.test(alias) && backend && typeof route.profile === "string" && id.test(route.profile) && typeof route.privileged === "boolean",
       "Each gateway profile requires a unique alias, backend, backend profile and privilege setting.");
     requireConfig(alias !== "standard" || !route.privileged, "The standard alias must be unprivileged.");
     routes.set(alias, { alias, backend: route.backend, profile: route.profile, privileged: route.privileged, ...backend });
   }
 
+  requireConfig(routes.get("standard") && !routes.get("standard").privileged, "Configure an unprivileged standard alias.");
+  const docker = routes.get("docker");
+  requireConfig(!docker || (docker.privileged && docker.backend !== routes.get("standard").backend),
+    "The Docker alias requires a separate privileged backend.");
+
   const principals = [];
+  const backendOwners = new Map();
   const credentialHashes = new Set();
   for (const [name, principal] of Object.entries(config.principals ?? {})) {
     requireConfig(id.test(name) && /^[a-f0-9]{64}$/.test(principal.tokenSha256) &&
@@ -48,21 +47,23 @@ function gatewayPolicy(config, load) {
     const allowed = new Map();
     for (const alias of principal.profiles ?? []) {
       const route = routes.get(alias);
-      requireConfig(route && Object.hasOwn(principal.backendTokenFiles ?? {}, route.backend),
-        "Every authorized profile requires a credential for its backend.");
+      const backendPrincipal = route && principal.backendPrincipals?.[route.backend];
+      requireConfig(typeof backendPrincipal === "string" && id.test(backendPrincipal),
+        "Every authorized profile requires an explicit backend principal.");
       allowed.set(alias, route);
     }
-    const tokens = new Map();
-    for (const backend of new Set([...allowed.values()].map((route) => route.backend))) {
-      const token = load(principal.backendTokenFiles[backend]).toString().trim();
-      const hash = digest(token);
-      requireConfig(tokenPattern.test(token) && !credentialHashes.has(hash),
-        "Backend credentials must be valid and unique to each gateway principal and backend.");
-      credentialHashes.add(hash);
-      tokens.set(backend, token);
-    }
     requireConfig(allowed.size > 0, "Each gateway principal requires at least one allowed profile.");
-    principals.push({ name, hash: Buffer.from(principal.tokenSha256, "hex"), allowed, tokens });
+    for (const backend of new Set([...allowed.values()].map((route) => route.backend))) {
+      const ownership = JSON.stringify([backend, principal.backendPrincipals[backend]]);
+      requireConfig(!backendOwners.has(ownership), "Each backend principal must belong to one Gateway principal.");
+      backendOwners.set(ownership, name);
+    }
+    principals.push({
+      name, hash: Buffer.from(principal.tokenSha256, "hex"),
+      allowed: new Map([...allowed].map(([alias, route]) => [
+        alias, { ...route, principal: principal.backendPrincipals[route.backend] },
+      ])),
+    });
   }
   requireConfig(principals.length > 0, "Configure at least one gateway principal.");
   return (authorization) => {
@@ -89,19 +90,22 @@ async function body(stream, max) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 
-function upstream(principal, route, method, path, headers = {}) {
-  const token = principal.tokens.get(route.backend);
-  if (!token) throw new GatewayError(403, "Backend access is unavailable.");
-  const session = connect(route.origin, { ca: route.ca });
+function upstream(load, route, method, path, headers = {}) {
+  const session = connect(route.origin, {
+    ...readTLS("/credentials", load),
+    ca: load(route.caFile),
+    rejectUnauthorized: true,
+    minVersion: "TLSv1.2",
+  });
   session.on("error", () => {});
-  const stream = session.request({ ":method": method, ":path": path, authorization: `Bearer ${token}`, ...headers });
+  const stream = session.request({ ":method": method, ":path": path, "x-paseo-backend-principal": route.principal, ...headers });
   stream.on("error", () => {});
   stream.once("close", () => session.destroy());
   return stream;
 }
 
-async function backendJson(principal, route, method, path, data) {
-  const stream = upstream(principal, route, method, path, data ? { "content-type": "application/json" } : {});
+async function backendJson(load, route, method, path, data) {
+  const stream = upstream(load, route, method, path, data ? { "content-type": "application/json" } : {});
   const timer = setTimeout(() => stream.destroy(new Error("Controller request timed out.")), 12_000).unref();
   let status;
   stream.on("response", (headers) => { status = headers[":status"]; });
@@ -122,9 +126,9 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-function relayExec(request, response, principal, route, path) {
+function relayExec(request, response, load, route, path) {
   if (response.destroyed) return;
-  const stream = upstream(principal, route, "POST", path + "/exec", {
+  const stream = upstream(load, route, "POST", path + "/exec", {
     "content-type": "application/octet-stream",
     "x-paseo-sandbox-profile": route.profile,
     "x-paseo-sandbox-privileged": String(route.privileged),
@@ -176,16 +180,16 @@ async function syncDirectory(file) {
 }
 
 function routeRecord(route) {
-  const { alias, backend, profile, origin, privileged } = route;
-  return { alias, backend, profile, origin, privileged };
+  const { alias, backend, profile, origin, privileged, principal } = route;
+  return { alias, backend, profile, origin, privileged, principal };
 }
 
 export function createGateway({ config, state, tls, load = readFileSync }) {
-  const authenticate = gatewayPolicy(config, load);
+  const authenticate = gatewayPolicy(config);
   const locks = new Map();
 
-  async function authorizedProfiles(principal, route) {
-    const { status, result } = await backendJson(principal, route, "GET", "/v1/profiles");
+  async function authorizedProfiles(route) {
+    const { status, result } = await backendJson(load, route, "GET", "/v1/profiles");
     if (status === 401 || status === 403) return [];
     if (status !== 200 || !Array.isArray(result.profiles)) throw new Error("Invalid controller profile response.");
     return result.profiles;
@@ -195,8 +199,9 @@ export function createGateway({ config, state, tls, load = readFileSync }) {
     p?.id === route.profile && p.privileged === route.privileged && typeof p.label === "string");
 
   return createSecureServer({ ...tls, allowHTTP1: true, minVersion: "TLSv1.2" }, async (request, response) => {
-    const { url, method } = request;
-    if (method === "GET" && url === "/healthz") return send(response, 200, { ok: true, type: "gateway" });
+    const { method } = request;
+    const url = request.url?.replace(/^\/v1\/gateway(?=\/)/, "/v1");
+    if (method === "GET" && (url === "/healthz" || request.url === "/v1/gateway/healthz")) return send(response, 200, { ok: true, type: "gateway" });
     const principal = authenticate(request.headers.authorization);
     if (!principal) return send(response, 401, { error: "Authentication required." });
 
@@ -204,7 +209,7 @@ export function createGateway({ config, state, tls, load = readFileSync }) {
       if (method === "GET" && url === "/v1/profiles") {
         const discoveries = new Map();
         for (const route of principal.allowed.values()) {
-          if (!discoveries.has(route.backend)) discoveries.set(route.backend, authorizedProfiles(principal, route));
+          if (!discoveries.has(route.backend)) discoveries.set(route.backend, authorizedProfiles(route));
         }
         const results = new Map();
         const settled = await Promise.allSettled([...discoveries].map(async ([backend, profiles]) =>
@@ -261,17 +266,17 @@ export function createGateway({ config, state, tls, load = readFileSync }) {
           if (!route || JSON.stringify(routeRecord(route)) !== JSON.stringify(record)) {
             return send(response, 403, { error: "Access to the sandbox route is unavailable." });
           }
-          if (!listed(await authorizedProfiles(principal, route), route)) {
+          if (!listed(await authorizedProfiles(route), route)) {
             return send(response, 403, { error: "Access to the sandbox profile is unavailable." });
           }
         }
 
         if (desired && desired !== route) {
-          if (!listed(await authorizedProfiles(principal, desired), desired)) {
+          if (!listed(await authorizedProfiles(desired), desired)) {
             return send(response, 403, { error: "Access to the requested profile is unavailable." });
           }
           if (route) {
-            const { status, result } = await backendJson(principal, route, "GET", sandboxPath(key, route.alias));
+            const { status, result } = await backendJson(load, route, "GET", sandboxPath(key, route.alias));
             if (status !== 200 || result.sandbox !== null) {
               return send(response, 409, { error: "Stop the existing sandbox before changing its profile." });
             }
@@ -292,10 +297,10 @@ export function createGateway({ config, state, tls, load = readFileSync }) {
               (privilege !== undefined && privilege !== String(route.privileged))) {
             return send(response, 409, { error: "Sandbox profile changed. Reopen the session in Paseo." });
           }
-          return relayExec(request, response, principal, route, path);
+          return relayExec(request, response, load, route, path);
         }
 
-        const { status, result } = await backendJson(principal, route, method, path, data && {
+        const { status, result } = await backendJson(load, route, method, path, data && {
           profile: route.profile, privileged: route.privileged, root: data.root, gitDir: data.gitDir,
         });
         if (status >= 200 && status < 300 && result.sandbox) {
@@ -319,7 +324,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const directory = await open(state, "r");
   await directory.sync();
   await directory.close();
-  createGateway({ config, state, tls: {
-    key: readFileSync("/tls/tls.key"), cert: readFileSync("/tls/tls.crt"),
-  } }).listen(8443);
+  const credentials = validateTLS(readTLS("/credentials"));
+  requireConfig(new X509Certificate(credentials.cert).checkHost(config.clientIdentity, {
+    subject: "never", wildcards: false,
+  }) === config.clientIdentity, "Gateway client certificate does not match its configured identity.");
+  for (const backend of Object.values(config.backends)) {
+    validateTLS({ ca: readFileSync(backend.caFile ?? "/credentials/ca.crt") });
+  }
+  const serving = () => readTLS("/tls");
+  const server = createGateway({ config, state, tls: serving() });
+  reloadTLS(server, serving);
+  server.listen(8443);
 }

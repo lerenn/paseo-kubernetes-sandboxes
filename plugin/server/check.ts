@@ -6,7 +6,7 @@ import { urlProblem } from "../shared/settings.js";
 import { ControllerError } from "./controller.js";
 
 export type CheckResult = { id: string; label: string; status: "ok" | "fail" | "unknown"; detail: string };
-type Api = { health(c: Connection): Promise<{ type?: EndpointType }>; profiles(c: Connection): Promise<SandboxProfile[]> };
+type Api = { health(c: Connection): Promise<{ type: EndpointType }>; profiles(c: Connection): Promise<SandboxProfile[]> };
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "The request failed.");
 
@@ -27,7 +27,7 @@ export async function checkController(c: Connection, api: Api): Promise<{ checks
   const checks: CheckResult[] = [];
   const add = (id: string, label: string, status: CheckResult["status"], detail: string) => checks.push({ id, label, status, detail });
   const skipped = "Skipped: fix the previous check first.";
-  const url = c.controllerUrl === "" ? "Set the connection URL." : urlProblem(c.controllerUrl);
+  const url = c.controllerUrl === "" ? "Set the Gateway URL." : urlProblem(c.controllerUrl);
   add("url", "HTTPS URL", url ? "fail" : "ok", url ?? `Using ${c.controllerUrl}.`);
   const [tokenProblem, caProblem] = await Promise.all([
     c.tokenFile ? fileProblem(c.tokenFile) : "Set the token file given by your administrator.",
@@ -44,8 +44,8 @@ export async function checkController(c: Connection, api: Api): Promise<{ checks
     add("auth", "Token accepted", "unknown", skipped);
   } else {
     try {
-      type = (await api.health(c)).type ?? "controller";
-      add("reach", "Endpoint reachable", "ok", "The endpoint answered over HTTPS.");
+      type = (await api.health(c)).type;
+      add("reach", "Endpoint reachable", "ok", "The Gateway answered over verified HTTPS.");
       try {
         known = await api.profiles(c);
         add("auth", "Token accepted", "ok", `The token may use ${known.length} profile${known.length === 1 ? "" : "s"}.`);

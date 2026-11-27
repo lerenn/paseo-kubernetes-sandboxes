@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { z } from "zod";
-import { endpointType, sandboxProfile } from "../shared/contracts.js";
+import { sandboxProfile } from "../shared/contracts.js";
 import type { Connection } from "../shared/settings.js";
 
 export class ControllerError extends Error {
@@ -22,7 +22,7 @@ const sandboxStatus = z.object({
 const statusResponse = z.object({ sandbox: sandboxStatus });
 export type SandboxStatus = z.infer<typeof sandboxStatus>;
 
-// One JSON request to the controller. The token is read per call (a rotated file is picked up) and never logged.
+// One JSON request to the Gateway. The token is read per call (a rotated file is picked up) and never logged.
 export function call<T>(c: Connection, method: string, path: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
   return new Promise((resolve, reject) => {
     let token = "";
@@ -33,13 +33,14 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
     } catch {
       return reject(new ControllerError(0, "Could not read the token file or CA file on the daemon host."));
     }
-    const url = new URL(path, c.controllerUrl);
+    const url = new URL(path === "/healthz" ? "/v1/gateway/healthz" : path.replace(/^\/v1\//, "/v1/gateway/"), c.controllerUrl);
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = httpsRequest(
       url,
       {
         method,
         ca,
+        rejectUnauthorized: true,
         timeout: timeoutMs,
         headers: {
           ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -52,7 +53,7 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
         res.on("error", reject);
         res.on("data", (chunk: Buffer) => {
           size += chunk.length;
-          if (size > 256 * 1024) req.destroy(new Error("controller response was too large"));
+          if (size > 256 * 1024) req.destroy(new Error("Gateway response was too large"));
           else chunks.push(chunk);
         });
         res.on("end", () => {
@@ -61,15 +62,15 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
           try {
             parsed = JSON.parse(Buffer.concat(chunks).toString());
           } catch {
-            return reject(new ControllerError(status, "The controller returned an invalid response."));
+            return reject(new ControllerError(status, "The Gateway returned an invalid response."));
           }
           if (status >= 200 && status < 300) resolve(parsed as T);
-          else reject(new ControllerError(status, String(parsed?.error ?? `The controller answered ${status}.`)));
+          else reject(new ControllerError(status, String(parsed?.error ?? `The Gateway answered ${status}.`)));
         });
       },
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", (e: NodeJS.ErrnoException) => reject(new ControllerError(0, `Could not reach the controller (${e.code ?? e.message}).`)));
+    req.on("error", (e: NodeJS.ErrnoException) => reject(new ControllerError(0, `Could not reach the Gateway (${e.code ?? e.message}).`)));
     req.end(payload);
   });
 }
@@ -77,14 +78,14 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
 const sandboxPath = (workspaceId: string) => `/v1/sandboxes/${encodeURIComponent(workspaceId)}`;
 
 export const health = async (c: Connection) =>
-  z.object({ ok: z.literal(true), type: endpointType.default("controller") }).parse(await call(c, "GET", "/healthz"));
+  z.object({ ok: z.literal(true), type: z.literal("gateway") }).parse(await call(c, "GET", "/healthz"));
 export const profiles = async (c: Connection, timeoutMs?: number) =>
   z.object({ profiles: z.array(sandboxProfile) }).parse(await call(c, "GET", "/v1/profiles", undefined, timeoutMs)).profiles;
 export const getSandbox = async (c: Connection, workspaceId: string) =>
   statusResponse.parse(await call(c, "GET", sandboxPath(workspaceId))).sandbox;
 export const stopSandbox = (c: Connection, workspaceId: string) => call(c, "DELETE", sandboxPath(workspaceId));
 
-// Creates the sandbox if needed and waits until it is ready (the controller answers immediately).
+// Creates the sandbox if needed and waits until it is ready (the Gateway answers immediately).
 export async function ensureSandbox(
   c: Connection & { profile: string; privileged?: boolean },
   workspaceId: string,

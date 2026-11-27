@@ -12,32 +12,27 @@
 <nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html" aria-current="page">Reference</a><a href="how-it-works.html">How it works</a><a class="gh" href="https://github.com/lerenn/paseo-kubernetes-sandboxes" aria-label="GitHub repository" title="GitHub repository"><svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></nav></div></header>
 <div class="doc">
 <aside class="sidebar"><details class="toc-mobile" open><summary>On this page</summary><nav aria-label="On this page">
-    <a href="#controller-install">Controller installation</a>
-    <a href="#gateway-install">Sandbox Gateway installation</a>
-    <a href="#connection">Connections</a>
+    <a href="#controller-install">Backend installation</a>
+    <a href="#gateway-install">Required Gateway</a>
+    <a href="#connection">Gateway settings</a>
     <a href="#profiles">Helm profiles</a>
     <a href="#tokens">Scoped tokens</a>
     <a href="#workspace-status">Workspace status</a>
   </nav></details></aside>
 <main id="content">
     <h1>Reference</h1>
-    <h2 id="controller-install">Controller installation</h2>
-    <p>Prepare your namespace, shared storage and controller values before installing. Use the example values and the administrator instructions for routing, TLS and token provisioning.</p>
-  <pre><code>helm upgrade --install sandbox \
-  oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller \
-  --version 0.5.7 --namespace paseo-sandboxes --create-namespace \
-  --values controller-values.yaml --wait</code></pre>
-    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#administrator-setup">Detailed administrator setup</a></p>
-    <h2 id="gateway-install">Sandbox Gateway installation</h2>
-    <p>Deploy the gateway in a separate release of the same chart with <code>controller.enabled: false</code> and <code>gateway.enabled: true</code>. Set <code>gateway.tlsSecretName</code> to an existing TLS Secret for the gateway hostname, <code>gateway.credentialsSecretName</code> to an existing Secret containing backend tokens and private CAs, and <code>gateway.stateClaimName</code> to a dedicated persistent volume claim. Use ReadWriteOncePod storage and retain the claim across upgrades and restarts.</p>
-    <p>Set <code>gateway.backends</code> to stable controller IDs, HTTPS origins and optional CA files under <code>/credentials</code>. Under <code>gateway.profiles</code>, assign a stable public alias to each backend profile and declare whether it is privileged. Distinct aliases let two controllers offer the same backend profile ID. Use the unprivileged alias <code>standard</code> for the default profile.</p>
-    <p>Under <code>gateway.principals</code>, configure a distinct gateway token digest, the allowed aliases and the token files for their controllers. Issue a dedicated controller principal and token for each gateway principal and backend, scoped to the intended backend profiles. Keep those principal IDs stable when rotating tokens. Restart the gateway deployment to pick up Secret changes. Stop affected sandboxes before removing grants or changing a route or controller identity.</p>
-    <p>The gateway Service is private. Route the daemon to its HTTPS endpoint over a network path that preserves bidirectional HTTP/2 streams. Give the user the gateway URL, their gateway token and the gateway CA when needed. Controller credentials stay mounted in the gateway.</p>
-    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/gateway-values.example.yaml">Example gateway values</a></p>
-    <h2 id="connection">Connections</h2>
-    <p>Give each controller or gateway connection a name and a stable ID. The Type column shows the detected endpoint type after the HTTPS check. Profiles identifies the backing controller for each gateway profile. Each connection has its own HTTPS origin, token and CA settings. Use <code>standard</code> for the default connection.</p>
+    <h2 id="controller-install">Backend installation</h2>
+    <p>Install the Standard and Docker controllers as separate Helm releases with <code>installation.role: backend</code>. Keep each in its own namespace with its required workspace storage and admission policy. The Docker release is optional.</p>
+    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#install-gateway-and-backends">Helm commands and values</a></p>
+    <h2 id="gateway-install">Required Gateway</h2>
+    <p>Install a release with <code>installation.role: gateway</code>. Provide a serving TLS Secret, a retained ReadWriteOncePod claim, backend HTTPS origins and per-principal profile grants. Cert-manager provisions and renews private controller serving and Gateway client certificates across namespaces. Each controller verifies the Gateway identity and applies the mapped backend principal's grants.</p>
+    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/config/gateway-values.example.yaml">Example Gateway values</a></p>
+    <p>For an existing direct installation, verify Gateway profiles and HTTP/2, stop old sandboxes, retire direct access and then migrate the saved assignments in the upgraded plugin.</p>
+    <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#upgrade-from-direct-connections">Staged upgrade procedure</a></p>
+    <h2 id="connection">Gateway settings</h2>
+    <p>Each Paseo daemon uses a single Gateway connection. Paths refer to files on the daemon host or inside its container.</p>
     <dl><dt>HTTPS URL</dt><dd>Private HTTPS origin reachable from the Paseo daemon. The route must support HTTP/2 streams.</dd>
-    <dt>Token file</dt><dd>Absolute daemon path to the raw endpoint token.</dd>
+    <dt>Token file</dt><dd>Absolute daemon path to the raw Gateway token.</dd>
     <dt>CA file</dt><dd>Absolute daemon path to the CA certificate for a private TLS endpoint. Leave empty to use system trust.</dd>
     </dl>
     <h2 id="profiles">Helm profiles</h2>
@@ -47,9 +42,9 @@
     <p>Ephemeral storage covers local usage such as writable layers, logs and disk-backed <code>emptyDir</code> volumes. Persistent worktrees and repositories use shared RWX PVCs. Set <code>docker.sizeLimit</code> separately to cap the Docker state <code>emptyDir</code> volume.</p>
     <p><strong>Standard</strong> is the default for new opt-ins when the token permits it. <strong>Docker (privileged)</strong> is an optional administrator-defined profile for trusted workspaces. Its privileged sidecar shares the same worktree mount and stores Docker state on a separate disk-backed volume.</p>
     <h2 id="tokens">Scoped tokens</h2>
-    <p>Each principal has a distinct <code>tokenSha256</code> and a list of allowed profiles. Sandbox identity also includes the principal and the workspace ID.</p>
+    <p>Each Gateway principal has a distinct <code>tokenSha256</code> and a list of allowed profiles. Sandbox identity also includes the principal and the workspace ID.</p>
     <h2 id="workspace-status">Workspace status</h2>
-    <p>Enable a workspace and save a connection and one of its authorized profiles to send new launches to Kubernetes. Profile IDs are scoped to the connection. New opt-ins preselect Standard when available on the default connection. Select Docker (privileged) explicitly on a connection authorized for it. <strong>Refresh status</strong> shows whether the pod is starting, running, stopping, failed or absent. <strong>Stop sandbox</strong> requests deletion while keeping the workspace opted in. Confirm the stop and wait for the pod to disappear before changing the connection or profile. Deletion ends running processes and discards ephemeral state.</p>
+    <p>Enable a workspace and save one of its authorized profiles. Standard is preselected when available. Choose Docker (privileged) explicitly. Use <strong>Refresh status</strong> to see the pod state. Stop the sandbox and wait for <strong>No sandbox</strong> before changing the profile. Stopping ends running processes and discards ephemeral state. The saved assignment and shared workspace files remain.</p>
   </main>
 </div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>

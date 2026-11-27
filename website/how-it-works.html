@@ -20,9 +20,9 @@
 <main id="content">
     <h1>How it works</h1>
     <h2 id="launch">Launch hooks</h2>
-    <p>When an opted-in workspace opens an agent or terminal or runs a command, the plugin asks the controller to prepare its sandbox. The controller checks the token and the profile saved for that workspace, then starts or reuses a pod. Paseo runs a local Node.js launcher that connects to the controller.</p>
+    <p>When an opted-in workspace opens an agent or terminal or runs a command, the plugin asks the Gateway to prepare its sandbox. The Gateway checks the token and routes the saved profile to its controller over mutual TLS. The controller checks the backend principal and profile grant before starting or reusing a pod.</p>
     <h2 id="streaming">Command and terminal streaming</h2>
-    <p>The launcher sends input and terminal size changes over HTTP/2. The controller bridges the stream to Kubernetes exec and returns standard output, standard error and the command's exit status. Interactive terminals use a remote TTY and return its combined output.</p>
+    <p>The launcher sends input and terminal size changes through the Gateway over HTTP/2. The controller bridges the stream to Kubernetes exec and returns standard output, standard error and the command's exit status. Interactive terminals use a remote TTY and return its combined output.</p>
     <h2 id="storage">Shared storage</h2>
     <p>The worktree mounts at the same path in the daemon and sandbox. Linked worktrees also mount their common Git metadata. The pod can write to that storage, so profiles should have separate storage roots for daemons that should have separate file access.</p>
     <h2 id="cleanup">Cleanup</h2>

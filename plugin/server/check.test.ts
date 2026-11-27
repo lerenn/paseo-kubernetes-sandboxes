@@ -15,7 +15,7 @@ test("checks credential files independently before making controller requests", 
   const connection = { controllerUrl: "https://sandbox.example.internal", tokenFile, caFile };
   const calls: string[] = [];
   const api = {
-    health: async () => { calls.push("health"); return {}; },
+    health: async () => { calls.push("health"); return { type: "gateway" as const }; },
     profiles: async () => { calls.push("profiles"); return []; },
   };
   const statuses = async (caPath = caFile) => {
@@ -45,13 +45,17 @@ test("profile discovery keeps resource metadata optional and preserves configure
   assert.deepEqual(sandboxProfile.parse(withResources), withResources);
 });
 
-test("detects gateways and falls back to controllers for older health responses", async (t) => {
+test("a rejected Gateway identity prevents sending a credential", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "sandbox-check-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const tokenFile = join(directory, "token");
   await writeFile(tokenFile, "token-secret");
   const connection = { controllerUrl: "https://sandbox.example.internal", tokenFile, caFile: "" };
+  const rejected = await checkController(connection, {
+    health: async () => { throw new Error("Gateway identity rejected"); },
+    profiles: async () => assert.fail("sent a credential to an unverified endpoint"),
+  });
+  assert.equal(rejected.checks.find(({ id }) => id === "reach")?.status, "fail");
   const profiles = async () => [];
-  assert.equal((await checkController(connection, { health: async () => ({}), profiles })).type, "controller");
   assert.equal((await checkController(connection, { health: async () => ({ type: "gateway" }), profiles })).type, "gateway");
 });

@@ -1,7 +1,31 @@
-{{- if .Values.gateway.enabled }}
+{{- if eq .Values.installation.role "gateway" }}
 {{- $name := printf "%s-sandbox-gateway" (.Release.Name | trunc 47 | trimSuffix "-") }}
 {{- $gateway := .Values.gateway }}
-{{- $config := dict "backends" (required "Configure gateway.backends." $gateway.backends) "profiles" (required "Configure gateway.profiles." $gateway.profiles) "principals" (required "Configure gateway.principals." $gateway.principals) | toJson }}
+{{- $identity := required "Set gateway.clientIdentity to the dedicated client DNS SAN." $gateway.clientIdentity }}
+{{- $serving := required "Set gateway.tlsSecretName." $gateway.tlsSecretName }}
+{{- $config := dict "backends" (required "Configure gateway.backends." $gateway.backends) "profiles" (required "Configure gateway.profiles." $gateway.profiles) "principals" (required "Configure gateway.principals." $gateway.principals) "clientIdentity" $identity | toJson }}
+{{- $credentials := default (printf "%s-client" $name | trunc 63 | trimSuffix "-") $gateway.credentialsSecretName }}
+{{- if eq $credentials $serving }}
+{{- fail "Gateway client and serving TLS must use separate Secrets." }}
+{{- end }}
+{{- if not $gateway.credentialsSecretName }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $credentials }}
+spec:
+  secretName: {{ $credentials }}
+  issuerRef:
+    name: {{ required "Set internalTLS.issuerName or gateway.credentialsSecretName." .Values.internalTLS.issuerName | quote }}
+    kind: ClusterIssuer
+  dnsNames: [{{ $identity | quote }}]
+  duration: 24h
+  renewBefore: 8h
+  usages: [digital signature, client auth]
+  privateKey:
+    rotationPolicy: Always
+---
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -74,6 +98,11 @@ spec:
             - name: credentials
               mountPath: /credentials
               readOnly: true
+            {{- if $gateway.backendTrustSecretName }}
+            - name: backend-trust
+              mountPath: /backend-trust
+              readOnly: true
+            {{- end }}
             - name: state
               mountPath: /state
       volumes:
@@ -82,10 +111,15 @@ spec:
             name: {{ $name }}
         - name: tls
           secret:
-            secretName: {{ required "Set gateway.tlsSecretName." $gateway.tlsSecretName | quote }}
+            secretName: {{ $serving | quote }}
         - name: credentials
           secret:
-            secretName: {{ required "Set gateway.credentialsSecretName." $gateway.credentialsSecretName | quote }}
+            secretName: {{ $credentials | quote }}
+        {{- if $gateway.backendTrustSecretName }}
+        - name: backend-trust
+          secret:
+            secretName: {{ $gateway.backendTrustSecretName | quote }}
+        {{- end }}
         - name: state
           persistentVolumeClaim:
             claimName: {{ required "Set gateway.stateClaimName." $gateway.stateClaimName | quote }}

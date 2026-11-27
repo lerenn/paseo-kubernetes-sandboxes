@@ -1,0 +1,27 @@
+installation:
+  role: backend
+internalTLS:
+  issuerName: paseo-sandbox-internal
+
+profiles:
+  docker:
+    image: ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable
+    worktree:
+      claimName: paseo-worktrees
+      basePath: /srv/paseo/worktrees
+    repository:
+      claimName: paseo-repositories
+      basePath: /srv/paseo/repos
+    docker:
+      enabled: true
+      image: docker:28.5.2-dind
+      sizeLimit: 20Gi
+      socketGroup: 1000
+    podSpec:
+      securityContext:
+        supplementalGroups: [1000]
+
+principals:
+  paseo-daemon:
+    gatewayIdentity: sandbox-gateway.paseo.svc
+    profiles: [docker]

@@ -3,6 +3,7 @@ import { createSecureServer } from "node:http2";
 import { kubeOpener, serveExec } from "./exec.mjs";
 import { inCluster, kubeClient, KubernetesError } from "./kubernetes.mjs";
 import { createPolicy, profileRevision, sandboxName } from "./policy.mjs";
+import { readTLS, reloadTLS } from "./tls.mjs";
 import { buildPod, label, managedBy } from "./pod.mjs";
 
 const config = JSON.parse(readFileSync(process.env.CONTROLLER_CONFIG, "utf8"));
@@ -92,15 +93,20 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-const server = createSecureServer({
-  allowHTTP1: true,
-  key: readFileSync("/tls/tls.key"),
-  cert: readFileSync("/tls/tls.crt"),
+const tlsOptions = () => ({
+  ...readTLS("/tls"),
+  ca: readFileSync(process.env.GATEWAY_CLIENT_CA_FILE),
+  requestCert: true,
+  rejectUnauthorized: config.allowDirect !== true,
   minVersion: "TLSv1.2",
-}, async (request, response) => {
+});
+const server = createSecureServer({ ...tlsOptions(), allowHTTP1: true }, async (request, response) => {
   const path = request.url;
   if (request.method === "GET" && path === "/healthz") return send(response, 200, { ok: true, type: "controller" });
-  const principal = policy.authenticate(request.headers.authorization);
+  const asserted = request.headers["x-paseo-backend-principal"];
+  const principal = asserted === undefined
+    ? policy.authenticateDirect(request.headers.authorization)
+    : policy.authenticateGateway(request.socket, asserted);
   if (!principal) return send(response, 401, { error: "Authentication required." });
   if (request.method === "GET" && path === "/v1/profiles") {
     return send(response, 200, { profiles: policy.profilesFor(principal) });
@@ -137,6 +143,9 @@ const server = createSecureServer({
       let pod = await kube.getPod(name);
       if (pod && !owns(pod, principal)) {
         return send(response, 409, { error: "Sandbox name is already in use." });
+      }
+      if (pod && !policy.profileFor(principal, status(pod).profile)) {
+        return send(response, 403, { error: "Profile access has been removed." });
       }
       if (exec) {
         if (request.httpVersionMajor !== 2) return send(response, 505, { error: "Command streaming requires HTTP/2." });
@@ -188,6 +197,7 @@ const server = createSecureServer({
     return send(response, 503, { error: "Sandbox operation failed. Check controller permissions and cluster availability." });
   }
 });
+reloadTLS(server, tlsOptions);
 server.listen(8443);
 async function scheduleSweep() {
   try {

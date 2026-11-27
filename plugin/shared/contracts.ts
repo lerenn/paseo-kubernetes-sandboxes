@@ -5,7 +5,7 @@ import { connectionSchema, settingsSchema } from "./settings.js";
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
 
-export const endpointType = z.enum(["controller", "gateway"]);
+export const endpointType = z.literal("gateway");
 export type EndpointType = z.infer<typeof endpointType>;
 
 const quantities = z.object({

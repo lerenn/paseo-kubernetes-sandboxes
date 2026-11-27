@@ -1,0 +1,45 @@
+{{- if not (has .Values.installation.role (list "gateway" "backend")) }}
+{{- fail "installation.role must be gateway or backend. Each installation requires a Gateway release." }}
+{{- end }}
+{{- if or (hasKey .Values.gateway "enabled") (hasKey .Values.controller "enabled") }}
+{{- fail "Replace legacy gateway.enabled and controller.enabled with installation.role." }}
+{{- end }}
+{{- if .Values.internalTLS.bootstrap }}
+{{- if ne .Values.installation.role "gateway" }}
+{{- fail "Bootstrap internal TLS from the Gateway release only." }}
+{{- end }}
+{{- $issuer := required "Set internalTLS.issuerName to bootstrap internal TLS." .Values.internalTLS.issuerName }}
+{{- $ns := .Values.internalTLS.clusterResourceNamespace }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer }}-bootstrap
+  namespace: {{ $ns }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $issuer }}-root
+  namespace: {{ $ns }}
+spec:
+  secretName: {{ $issuer }}-root
+  commonName: {{ $issuer }}
+  isCA: true
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    rotationPolicy: Never
+  issuerRef:
+    name: {{ $issuer }}-bootstrap
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $issuer }}
+spec:
+  ca:
+    secretName: {{ $issuer }}-root
+{{- end }}

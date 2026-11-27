@@ -15,12 +15,14 @@
   <img class="hero-logo" src="assets/favicon.png" width="64" height="64" alt="">
   <h1>Run a Paseo workspace in a pod</h1>
   <p class="lead">Run agents, terminals and commands in Kubernetes while Paseo keeps the worktree and file views in sync through shared storage.</p>
-  <div class="actions"><a class="button" href="getting-started.html">Set up the controller</a><a class="button secondary" href="https://github.com/lerenn/paseo-kubernetes-sandboxes">View on GitHub</a></div>
+  <div class="actions"><a class="button" href="getting-started.html">Set up Kubernetes Sandbox</a><a class="button secondary" href="https://github.com/lerenn/paseo-kubernetes-sandboxes">View on GitHub</a></div>
 </section>
-<figure class="architecture" aria-label="The Paseo daemon talks to the sandbox controller over private HTTPS. The controller manages a pod per opted-in workspace.">
+<figure class="architecture" aria-label="The Paseo daemon connects to the Gateway over HTTPS. The Gateway routes profiles over mutual TLS to controllers, which manage workspace pods.">
   <div class="main-daemon"><strong>Paseo daemon</strong><small>Kubernetes Sandbox plugin</small></div>
   <div class="connector" aria-hidden="true"></div>
-  <div class="main-daemon"><strong>Sandbox controller</strong><small>Private HTTPS · Scoped token</small></div>
+  <div class="main-daemon"><strong>Sandbox Gateway</strong><small>Private HTTPS · One scoped token</small></div>
+  <div class="connector" aria-hidden="true"></div>
+  <div class="main-daemon"><strong>Standard and Docker controllers</strong><small>Mutual TLS · Scoped profile grants</small></div>
   <div class="connector" aria-hidden="true"></div>
   <div class="pods"><div class="pod"><strong>Workspace A</strong><small>Sandbox pod · Shared worktree</small></div><div class="pod"><strong>Workspace B</strong><small>Sandbox pod · Shared worktree</small></div></div>
   <figcaption>Each opted-in workspace gets a pod when it first runs an agent, terminal or command.</figcaption>

@@ -1,17 +1,19 @@
-controller:
-  enabled: false
+installation:
+  role: gateway
+
+internalTLS:
+  issuerName: paseo-sandbox-internal
+  bootstrap: true
+
 gateway:
-  enabled: true
   tlsSecretName: gateway-tls
-  credentialsSecretName: gateway-backend-credentials
+  clientIdentity: sandbox-gateway.paseo.svc
   stateClaimName: gateway-state
   backends:
     standard-controller:
-      url: https://standard-controller.standard.svc
-      caFile: /credentials/standard-ca.crt
+      url: https://standard-sandbox-controller.standard.svc
     docker-controller:
-      url: https://docker-controller.docker.svc
-      caFile: /credentials/docker-ca.crt
+      url: https://docker-sandbox-controller.docker.svc
   profiles:
     standard:
       backend: standard-controller
@@ -22,14 +24,9 @@ gateway:
       profile: docker
       privileged: true
   principals:
-    developer:
+    paseo-daemon:
       tokenSha256: "REPLACE_WITH_GATEWAY_TOKEN_SHA256"
-      profiles: [standard]
-      backendTokenFiles:
-        standard-controller: /credentials/developer-standard.token
-    docker-developer:
-      tokenSha256: "REPLACE_WITH_DISTINCT_GATEWAY_TOKEN_SHA256"
       profiles: [standard, docker]
-      backendTokenFiles:
-        standard-controller: /credentials/docker-developer-standard.token
-        docker-controller: /credentials/docker-developer-docker.token
+      backendPrincipals:
+        standard-controller: paseo-daemon
+        docker-controller: paseo-daemon
