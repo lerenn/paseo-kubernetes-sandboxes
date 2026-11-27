@@ -22,6 +22,10 @@ The sidecar runs privileged and shares the workspace's exact worktree mount path
 
 Docker requires a cluster and namespace that allow privileged containers. Give access only to trusted daemons and workspaces. A privileged sidecar has broad node access. Docker images, containers and volumes in this sandbox are discarded when the sandbox pod is deleted.
 
+For lab deployments, use a dedicated Docker controller and namespace with separate credentials and TLS trust. Configure a Docker-only principal and a PVC rooted at the approved lab storage directory. Provide a separately approved repository mapping if linked Git worktrees require it. Apply admission rules in the Docker namespace that restrict privileged containers to the controller-managed Docker sidecar and constrain the allowed images, PVCs and pod settings. The lab team owns the namespace, storage and admission policy.
+
+Each controller accepts only its configured principals and profiles, scopes pod operations to its release, principal and workspace ID, and checks worktree and repository paths against profile mappings. The chart Role operates within its namespace. The dedicated controller needs the chart's existing namespace permissions. Test the lab policy against both the intended pod and rejected pod specs before enabling Docker workspaces.
+
 ### Issue a scoped token
 
 Generate a distinct token for each daemon. Keep the raw token in a file readable only by the daemon identity, and configure its SHA-256 digest and permitted profiles in your values.
@@ -39,7 +43,7 @@ Copy [the example values](../config/controller-values.example.yaml) and set the 
 ```sh
 helm upgrade --install sandbox \
   oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller \
-  --version 0.5.0 --namespace paseo-sandboxes --create-namespace \
+  --version 0.5.2 --namespace paseo-sandboxes --create-namespace \
   --values controller-values.yaml --wait
 ```
 
@@ -67,11 +71,15 @@ The controller names and owns sandbox pods per release, principal and workspace.
 ## Paseo user setup
 
 1. Install the plugin from the release checkout on the daemon host with `paseo plugin install "$PWD/plugin"`. The manifest installs the plugin dependencies. Paseo 0.17.5 and Node.js 22 or later are supported.
-2. Open **Kubernetes Sandbox** and enter the controller HTTPS URL, absolute daemon-local token path, and absolute daemon-local CA path if the endpoint uses a private CA.
-3. Run **Check connection** to verify TLS, the token and its permitted profiles. Save the connection. Select **Enable sandbox** for a workspace, choose a profile backed by its shared storage, and confirm. Paseo offers only profiles allowed by the token and saves the choice for that workspace.
-4. Open a new terminal or start an agent. **Refresh status** shows the sandbox state. **Stop sandbox** terminates that workspace's current pod and sessions. A later launch recreates it while the workspace stays opted in. To change profiles, first confirm **Stop and delete sandbox**, wait for **No sandbox** and select **Change profile**. Running processes and ephemeral state are lost on deletion. Shared worktree files are kept.
+2. Open **Kubernetes Sandbox**, select **Add connection**, and save a name and stable connection ID. For each connection, enter its HTTPS origin, absolute daemon-local token path, and absolute daemon-local CA path if it uses a private CA. Use the ID `standard` for the default connection.
+3. Run **Check connection** to verify TLS, the token and its permitted profiles. In **Workspaces**, select **Enable sandbox**. Standard is preselected when authorized on the default connection. For Docker, select the dedicated Docker connection and explicitly select **Docker (privileged)**. The workspace saves the connection and profile together, so profile IDs can repeat on different controllers.
+4. Open a new terminal or start an agent. **Refresh status** shows the sandbox state. **Stop sandbox** terminates that workspace's current pod and sessions. A later launch recreates it while the workspace stays opted in. To change a connection or profile, first confirm **Stop and delete sandbox**, wait for **No sandbox**, then select **Change connection or profile**. Changes to a connection's endpoint or credential paths require its workspaces to have no pods. To rotate a token for the same principal, keep its file path and follow the rotation procedure above. Running processes and ephemeral state are lost on deletion. Shared worktree files are kept.
 
 Existing sessions keep their launch location until reopened. Opted-in launches fail if their controller or storage is unavailable. Disabling the plugin removes its launch hooks. Preserve the plugin installation and opt-in settings if those workspaces must keep running in Kubernetes.
+
+### Upgrade from 0.5.0 or 0.5.1
+
+The existing endpoint and file paths migrate to the **Standard** connection. Workspace opt-ins and saved profiles stay attached to that connection. An opt-in awaiting a profile still needs a selection before launch. Existing controllers accept the new plugin's requests; controllers from this release also verify the profile on new exec requests.
 
 ### Upgrade from releases before 0.5
 

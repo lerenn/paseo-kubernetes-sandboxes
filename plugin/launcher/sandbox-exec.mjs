@@ -6,6 +6,8 @@
 //   --token-file FILE  file holding the scoped controller token (never passed on the command line)
 //   --ca-file FILE     CA certificate that signed the controller's certificate (optional)
 //   --workspace ID     workspace id of the sandbox
+//   --profile ID       expected profile of the sandbox
+//   --privileged BOOL  expected privilege level of the sandbox
 //   --cwd DIR          working directory in the sandbox
 //   --env NAME         forward this local environment variable (repeatable)
 //
@@ -31,6 +33,8 @@ while (args.length) {
   else if (flag === "--token-file") options.tokenFile = value;
   else if (flag === "--ca-file") options.caFile = value;
   else if (flag === "--workspace") options.workspace = value;
+  else if (flag === "--profile") options.profile = value;
+  else if (flag === "--privileged") options.privileged = value;
   else if (flag === "--cwd") options.cwd = value;
   else if (flag === "--env") options.env.push(value);
   else fail(`unknown option ${flag}`);
@@ -77,6 +81,8 @@ const session = connect(url.origin, { ca });
 session.on("error", (error) => connectionError("could not reach the controller", error));
 const stream = session.request({
   ":method": "POST",
+  ...(options.privileged === undefined ? {} : { "x-paseo-sandbox-privileged": options.privileged }),
+  ...(options.profile ? { "x-paseo-sandbox-profile": options.profile } : {}),
   ":path": `/v1/sandboxes/${encodeURIComponent(options.workspace)}/exec`,
   authorization: `Bearer ${token}`,
   "content-type": "application/octet-stream",
