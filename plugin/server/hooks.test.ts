@@ -9,7 +9,8 @@ const legacy = {
   caFile: "/var/lib/paseo/sandbox.crt",
   workspaces: [{ id: "w1", profile: "standard" }, { id: "w2", profile: "docker" }, { id: "pending" }],
 };
-const config = settingsSchema.parse(migrateSettings(legacy, 1));
+const migrated = settingsSchema.parse(migrateSettings(legacy, 1));
+const config = { ...migrated, connections: migrated.connections.map((connection) => ({ ...connection, gateway: true })) };
 
 const deps: HookDeps = {
   configuration: async () => config,
@@ -21,7 +22,7 @@ const launch = { workspaceId: "w1", cwd: "/wt/a/sub", env: { FOO: "secret-value"
 test("only opted-in launches are wrapped", async () => {
   assert.equal(await wrapFor(deps, { ...launch, workspaceId: "other" }), undefined);
   assert.equal(await wrapFor(deps, { ...launch, workspaceId: null }), undefined);
-  assert.equal(await wrapFor(deps, { ...launch, wrap: ["/other"] }), undefined);
+  await assert.rejects(wrapFor(deps, { ...launch, wrap: ["/other"] }), /conflicting wrapper/);
 });
 
 test("the wrap uses shared paths and forwards only environment names", async () => {
@@ -65,37 +66,16 @@ test("each workspace launches with its saved profile and legacy opt-ins must cho
 
 test("migration preserves the Standard connection and existing workspace selections", () => {
   const { workspaces, ...connection } = legacy;
-  assert.deepEqual(config.connections, [{ ...connection, id: "standard", name: "Standard" }]);
+  assert.deepEqual(migrated.connections, [{ ...connection, id: "standard", name: "Standard", gateway: false }]);
   assert.deepEqual(config.workspaces, workspaces.map((workspace) => ({ ...workspace, connectionId: "standard" })));
 });
 
-test("duplicate profile IDs use the saved connection for launch, teardown and exec", async () => {
-  const docker = {
-    id: "docker-lab", name: "Docker Lab", controllerUrl: "https://docker.example.internal",
-    tokenFile: "/etc/docker.token", caFile: "/etc/docker.ca",
-  };
-  const multi = settingsSchema.parse({
-    connections: [...config.connections, docker],
-    workspaces: [...config.workspaces, { id: "w3", connectionId: docker.id, profile: "standard" }],
-  });
-  const input = { ...launch, workspaceId: "w3" };
-  const selected = {
+test("legacy assigned workspaces fail closed until Gateway migration", async () => {
+  await assert.rejects(wrapFor({
     ...deps,
-    configuration: async () => multi,
-    ensure: async (connection: Parameters<NonNullable<HookDeps["ensure"]>>[0]) => {
-      assert.deepEqual(connection, { ...docker, profile: "standard" });
-    },
-    status: async (connection: Parameters<NonNullable<HookDeps["status"]>>[0]) => {
-      assert.deepEqual(connection, docker);
-      return { ready: true, deleting: false, phase: "Running", profile: "standard" };
-    },
-  };
-  for (const reuseOnly of [false, true]) {
-    const wrap = await wrapFor(selected, { ...input, reuseOnly });
-    assert.deepEqual(wrap?.slice(6, 12), [
-      "--url", docker.controllerUrl, "--token-file", docker.tokenFile, "--ca-file", docker.caFile,
-    ]);
-  }
+    configuration: async () => migrated,
+    repo: async () => assert.fail("legacy routes must never be used"),
+  }, launch), /Verify and save the Gateway/);
 });
 
 test("launches reject a privilege change under a saved profile ID", async () => {

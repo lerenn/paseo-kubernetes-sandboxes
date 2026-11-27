@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, constants, createSecureServer } from "node:http2";
 import { request } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { createGateway } from "./gateway.mjs";
+import { createPolicy } from "./policy.mjs";
 
 const token = (character) => character.repeat(43);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -21,24 +24,45 @@ async function listen(server) {
   return `https://127.0.0.1:${server.address().port}`;
 }
 
-async function fixture(t) {
+async function fixture(t, { commandFixture = false } = {}) {
   const state = mkdtempSync(join(tmpdir(), "paseo-gateway-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
-  execFileSync("openssl", [
-    "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
-    "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", join(state, "key"), "-out", join(state, "cert"),
-  ], { stdio: "ignore" });
-  const tls = { key: readFileSync(join(state, "key")), cert: readFileSync(join(state, "cert")) };
-  const files = new Map([["ca", tls.cert], ["a", token("C")], ["b", token("D")], ["c", token("E")]]);
+  const openssl = (...args) => execFileSync("openssl", args, { cwd: state, stdio: "ignore" });
+  openssl("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+    "-days", "1", "-subj", "/CN=Testing CA", "-keyout", "ca.key", "-out", "ca.crt");
+  function issue(name, extension) {
+    openssl("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+      "-subj", "/CN=" + name, "-keyout", name + ".key", "-out", name + ".csr");
+    writeFileSync(join(state, "ext"), extension);
+    openssl("x509", "-req", "-in", name + ".csr", "-CA", "ca.crt", "-CAkey", "ca.key",
+      "-CAcreateserial", "-days", "1", "-extfile", "ext", "-out", name + ".crt");
+    return { key: readFileSync(join(state, name + ".key")), cert: readFileSync(join(state, name + ".crt")) };
+  }
+  const tls = issue("server", "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth");
+  const gatewayIdentity = "gateway.internal.test";
+  const issueClient = (name, identity) => issue(name, `subjectAltName=DNS:${identity}\nextendedKeyUsage=clientAuth`);
+  const legitimate = issueClient("client", gatewayIdentity);
+  const rogue = issueClient("rogue", "other.internal.test");
+  const renewed = issueClient("renewed", gatewayIdentity);
+  const ca = readFileSync(join(state, "ca.crt"));
+  const files = new Map([["ca", ca], ["/credentials/tls.key", legitimate.key], ["/credentials/tls.crt", legitimate.cert]]);
   const accesses = [];
   let onCancel;
   const sessions = new Set();
   function backend(name, privileged, credentials) {
     const sandboxes = new Map();
-    const server = createSecureServer(tls);
+    const policy = createPolicy({
+      profiles: { shared: {
+        image: "workspace", worktree: { claimName: "workspace", basePath: "/workspace" },
+        ...(privileged ? { docker: { enabled: true, image: "docker" } } : {}),
+      } },
+      principals: Object.fromEntries(credentials.map((principal) => [principal, { gatewayIdentity, profiles: ["shared"] }])),
+    });
+    const server = createSecureServer({ ...tls, ca, requestCert: true, rejectUnauthorized: true });
     t.after(() => { server.close(); });
     server.on("request", async (req, res) => {
-      const owner = credentials.get(req.headers.authorization);
+      assert.equal(req.headers.authorization, undefined);
+      const owner = policy.authenticateGateway(req.socket, req.headers["x-paseo-backend-principal"]);
       accesses.push([name, req.method, req.url, owner]);
       const reply = (status, data) => {
         res.writeHead(status, { "content-type": "application/json" });
@@ -46,7 +70,7 @@ async function fixture(t) {
       };
       if (!owner) return reply(401, { error: "Authentication required." });
       if (req.url === "/v1/profiles") {
-        return reply(200, { profiles: [{ id: "shared", label: name, privileged }] });
+        return reply(200, { profiles: policy.profilesFor(owner) });
       }
       const key = owner + ":" + req.url.replace(/\/exec$/, "");
       if (req.method === "PUT") {
@@ -65,7 +89,16 @@ async function fixture(t) {
         res.once("close", () => onCancel?.());
         res.writeHead(200, { "content-type": "application/octet-stream" });
         res.flushHeaders();
-        req.pipe(res);
+        if (commandFixture) {
+          req.once("data", (start) => {
+            assert.equal(start[0], 0);
+            const args = JSON.parse(start.subarray(5, 5 + start.readUInt32BE(1)));
+            assert.deepEqual(args.command, ["fixture"]);
+            res.end(Buffer.from([1, 0, 0, 0, 2, 111, 107, 3, 0, 0, 0, 1, 0]));
+          });
+        } else {
+          req.pipe(res);
+        }
         return;
       }
       reply(req.method === "DELETE" ? 202 : 200, { sandbox: sandboxes.get(key) ?? null });
@@ -73,12 +106,8 @@ async function fixture(t) {
     return server;
   }
   const backends = {
-    safe: { url: await listen(backend("safe", false, new Map([
-      [auth(token("C")).authorization, "alice"], [auth(token("D")).authorization, "bob"],
-    ]))), caFile: "ca" },
-    dind: { url: await listen(backend("dind", true, new Map([
-      [auth(token("E")).authorization, "bob"],
-    ]))), caFile: "ca" },
+    safe: { url: await listen(backend("safe", false, ["alice", "bob"])), caFile: "ca" },
+    dind: { url: await listen(backend("dind", true, ["bob"])), caFile: "ca" },
   };
   const config = {
     backends,
@@ -87,8 +116,8 @@ async function fixture(t) {
       docker: { backend: "dind", profile: "shared", privileged: true },
     },
     principals: {
-      alice: { tokenSha256: hash(token("A")), profiles: ["standard"], backendTokenFiles: { safe: "a" } },
-      bob: { tokenSha256: hash(token("B")), profiles: ["standard", "docker"], backendTokenFiles: { safe: "b", dind: "c" } },
+      alice: { tokenSha256: hash(token("A")), profiles: ["standard"], backendPrincipals: { safe: "alice" } },
+      bob: { tokenSha256: hash(token("B")), profiles: ["standard", "docker"], backendPrincipals: { safe: "bob", dind: "bob" } },
     },
   };
   let url;
@@ -109,7 +138,7 @@ async function fixture(t) {
   t.after(stop);
   function call(method, path, user, data) {
     return new Promise((resolve, reject) => {
-      const req = request(url + path, { method, ca: tls.cert, agent: false, headers: {
+      const req = request(url + path, { method, ca, agent: false, headers: {
         ...auth(token(user)), ...(data ? { "content-type": "application/json" } : {}),
       } }, async (res) => {
         const chunks = [];
@@ -121,7 +150,12 @@ async function fixture(t) {
     });
   }
   return {
-    call, accesses, config, address: () => url, ca: tls.cert, start, stop,
+    call, accesses, config, address: () => url, ca, start, stop,
+    useClient(material) {
+      files.set("/credentials/tls.key", material.key);
+      files.set("/credentials/tls.crt", material.cert);
+    },
+    rogue, renewed, legitimate, files, serverCert: tls.cert, state,
     cancelled: () => new Promise((resolve) => { onCancel = resolve; }),
   };
 }
@@ -196,4 +230,38 @@ test("gateway preserves HTTP/2 input, output, resize bytes, half-close, and canc
   active.close(constants.NGHTTP2_CANCEL);
   await finished;
   session.destroy();
+});
+
+test("mTLS rejects unrelated identities and verifies the controller, with stable ownership after renewal", { timeout: 10000 }, async (t) => {
+  const { call, useClient, rogue, renewed, legitimate, files, serverCert, ca, config, stop, start } = await fixture(t);
+  const profilesPath = "/v1/gateway/profiles";
+  assert.equal((await call("PUT", path, "B", { profile: "docker", privileged: true }))[0], 200);
+  useClient(rogue);
+  assert.deepEqual((await call("GET", profilesPath, "B"))[1].profiles, []);
+  assert.equal((await call("GET", path, "B"))[0], 403);
+  useClient(renewed);
+  assert.equal((await call("GET", path, "B"))[1].sandbox.profile, "docker");
+
+  await stop();
+  config.principals.bob.backendPrincipals.dind = "ungranted";
+  await start();
+  assert.equal((await call("GET", path, "B"))[0], 403);
+
+  useClient(legitimate);
+  files.set("ca", serverCert);
+  assert.equal((await call("GET", profilesPath, "A"))[0], 503);
+  files.set("ca", ca);
+  assert.equal((await call("GET", profilesPath, "A"))[0], 200);
+});
+
+test("the launcher verifies the Gateway and streams through the versioned HTTP/2 route", { timeout: 10000 }, async (t) => {
+  const { call, address, state } = await fixture(t, { commandFixture: true });
+  await call("PUT", path, "A", { profile: "standard" });
+  writeFileSync(join(state, "token"), token("A"));
+  const launcher = fileURLToPath(new URL("../plugin/launcher/sandbox-exec.mjs", import.meta.url));
+  const result = await promisify(execFile)(process.execPath, [
+    launcher, "--url", address(), "--token-file", join(state, "token"), "--ca-file", join(state, "ca.crt"),
+    "--workspace", "workspace/example", "--profile", "standard", "--privileged", "false", "--cwd", "/workspace", "--", "fixture",
+  ]);
+  assert.equal(result.stdout, "ok");
 });

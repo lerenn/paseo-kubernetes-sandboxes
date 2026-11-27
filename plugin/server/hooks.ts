@@ -35,13 +35,10 @@ export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap 
     return undefined;
   }
   if (input.wrap) {
-    if (config.requireSandboxProfile) {
-      throw new Error("Another plugin selected a launch wrapper. Remove the conflicting wrapper and retry.");
-    }
-    return undefined;
+    throw new Error("Another plugin selected a launch wrapper. Remove the conflicting wrapper and retry.");
   }
   const { workspace, connection } = route;
-  if (!isConfigured(connection)) throw new Error("Set the controller URL and token file in Kubernetes Sandbox.");
+  if (!isConfigured(connection)) throw new Error("Verify and save the Gateway connection in Kubernetes Sandbox before launching this assigned workspace.");
   if (!workspace.profile) throw new Error("Choose a profile for this workspace in Kubernetes Sandbox.");
   const privileged = workspace.privileged ?? (config.requireSandboxProfile ? false : undefined);
   const deadline = Date.now() + (deps.startTimeoutMs ?? 25_000);

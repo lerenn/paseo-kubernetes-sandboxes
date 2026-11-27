@@ -10,7 +10,7 @@ export function urlProblem(value: string): string | null {
   try {
     url = new URL(value);
   } catch {
-    return "Enter a full URL such as https://sandbox-controller.example.internal.";
+    return "Enter a full URL such as https://sandbox.example.internal.";
   }
   if (url.protocol !== "https:") return "The connection URL must use https.";
   if (url.username || url.password) return "Use the token file for credentials.";
@@ -33,6 +33,7 @@ export const connectionSchema = connection.superRefine(validateUrl);
 export const standardConnectionId = "standard";
 export const namedConnectionSchema = connectionSchema.safeExtend({
   id: profileId,
+  gateway: z.boolean().default(false),
   name: z.string().trim().min(1).max(80),
 });
 export const profileRequiredMessage =
@@ -53,20 +54,22 @@ export const settingsSchema = z.object({
     ctx.addIssue({ code: "custom", message: "Connection and workspace IDs must be unique." });
   }
   if (workspaces.some(({ connectionId }) => !ids.has(connectionId))) {
-    ctx.addIssue({ code: "custom", path: ["workspaces"], message: "Each workspace needs a saved controller connection." });
+    ctx.addIssue({ code: "custom", path: ["workspaces"], message: "Each workspace needs a saved Gateway connection." });
   }
 });
 export type Configuration = z.output<typeof settingsSchema>;
 export type Connection = z.output<typeof connectionSchema>;
 export type NamedConnection = z.output<typeof namedConnectionSchema>;
 
-export const isConfigured = (c: Connection) => c.controllerUrl !== "" && c.tokenFile !== "";
+export const isConfigured = (c: NamedConnection) => c.gateway && c.controllerUrl !== "" && c.tokenFile !== "";
+export const needsGatewayMigration = (c: Configuration) => c.connections.some(({ gateway }) => !gateway);
+
 
 export function workspaceRoute(c: Configuration, id: string) {
   const workspace = c.workspaces.find((w) => w.id === id);
   if (!workspace) return undefined;
   const connection = c.connections.find(({ id }) => id === workspace.connectionId);
-  if (!connection) throw new Error("The workspace controller connection is missing.");
+  if (!connection) throw new Error("The workspace Gateway connection is missing.");
   return { workspace, connection };
 }
 
@@ -86,7 +89,7 @@ export function migrateSettings(values: unknown, fromVersion: number) {
 export const sandboxSettings = defineSettings({
   id: "sandbox",
   scope: "host",
-  version: 2,
+  version: 3,
   schema: settingsSchema,
   migrate: migrateSettings,
 });

@@ -15,21 +15,24 @@
   <h1>Getting started</h1>
   <section aria-labelledby="admin-setup">
     <h2 id="admin-setup">Admin setup</h2>
-    <p>On Kubernetes 1.34 or later, deploy the controller with Helm in a dedicated namespace. Configure a sandbox image, shared storage and profiles, and provision a scoped token for each daemon.</p>
-    <p>To offer profiles from multiple controllers through one endpoint, install the optional <a href="reference.html#gateway-install">Sandbox Gateway</a> as a separate Helm release. Configure each user’s authorized profiles and provision a scoped controller credential for each backend they use.</p>
-    <p>Give the user a private HTTPS endpoint reachable over HTTP/2 from the Paseo daemon, the absolute path to the token file on that daemon, and the CA file path if needed. For commands and details on TLS, storage and tokens, see the <a href="reference.html#controller-install">Reference</a>.</p>
+    <ol>
+      <li>Set up the Gateway and Standard controller from one shared Helm values file. Add a separate Docker controller in an approved namespace if you offer Docker. Prepare shared workspace storage and a persistent volume for Gateway routing.</li>
+      <li>Use cert-manager for private controller and Gateway client TLS. Provide the Gateway serving certificate and expose its HTTPS endpoint on a route that carries bidirectional HTTP/2.</li>
+      <li>Give each Paseo daemon one Gateway token and grant Standard and, where appropriate, Docker. Share the HTTPS URL, daemon-local token file path and private Gateway CA path if needed.</li>
+    </ol>
+    <p><a href="reference.html#gateway-install">Helm values and migration</a></p>
   </section>
   <section aria-labelledby="user-setup">
     <h2 id="user-setup">User setup</h2>
     <ol>
       <li>If needed, install the plugin on the daemon running Paseo 0.17.5 or later and Node.js 22 or later.
-        <pre><code>paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.5.7</code></pre>
+        <pre><code>paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.0</code></pre>
       </li>
-      <li>In <strong>Kubernetes Sandbox → Connections</strong>, select <strong>Add connection</strong>. Use <code>standard</code> as the ID for the default connection. Enter the controller or gateway HTTPS URL and absolute file paths as seen by the daemon, including inside its container if applicable. Select <strong>Save connection</strong>, then <strong>Check connection</strong>.</li>
-      <li>Under <strong>Workspaces</strong>, select <strong>Enable sandbox</strong>, choose a connection and one of its authorized profiles, then confirm with <strong>Enable with profile</strong>.</li>
+      <li>In <strong>Kubernetes Sandbox → Gateway</strong>, enter the URL, token file path and optional CA file path provided by your administrator. Select <strong>Check connection</strong>, then <strong>Save Gateway</strong>.</li>
+      <li>In <strong>Workspaces</strong>, select <strong>Enable sandbox</strong>. Standard is preselected when authorized. Select <strong>Docker (privileged)</strong> explicitly when the workspace needs Docker and your token grants it.</li>
     </ol>
-    <p>To require a profile on this daemon, turn on <strong>Require a sandbox profile</strong> in <strong>Connections</strong>. It starts off. Create a blank workspace, then choose a profile under <strong>Workspaces</strong> before starting an agent, terminal or setup command. The policy applies to new launches through Paseo’s workspace hooks. Active sessions and daemon maintenance continue. If automatic worktree setup was refused, assign a profile and run the setup commands from a workspace terminal.</p>
-    <p>For Docker access, ask your administrator for a gateway token that authorizes Docker or a dedicated Docker controller connection. In <strong>Workspaces</strong>, select a connection that offers Docker and explicitly choose <strong>Docker (privileged)</strong>. The Standard connection remains the default for new opt-ins. Existing workspace assignments continue to use their saved connections.</p>
+    <p>Enable <strong>Require a sandbox profile</strong> in <strong>Gateway</strong> to require an authorized profile on new workspace launches.</p>
+    <p>Upgrading from direct connections? Wait for your administrator to confirm the Gateway is ready and the old sandboxes are stopped. Upgrade the existing plugin, then select <strong>Gateway → Migrate to Gateway</strong> to move your saved assignments.</p>
   </section>
 </article>
 </main>

@@ -5,7 +5,7 @@ import { ExternalLink, Icon, Loading, ScrollView, SettingsSwitch } from "@getpas
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList, type SandboxProfile } from "../shared/contracts.js";
 import {
-  isConfigured, namedConnectionSchema, sandboxSettings, settingsSchema, standardConnectionId,
+  isConfigured, needsGatewayMigration, namedConnectionSchema, sandboxSettings, settingsSchema, standardConnectionId,
   workspaceRoute, type Configuration, type NamedConnection,
 } from "../shared/settings.js";
 import { Badge, Button, Card, Choice, Field } from "./components.js";
@@ -15,7 +15,7 @@ const controllerIcon = "Server";
 const TABS = [
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
   { id: "profiles", label: "Profiles", icon: "Layers" },
-  { id: "connection", label: "Connections", icon: controllerIcon },
+  { id: "connection", label: "Gateway", icon: controllerIcon },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -23,24 +23,23 @@ type TabId = (typeof TABS)[number]["id"];
 const setupGuide = "https://kubernetes-sandboxes.paseo.lerenn.dev/getting-started.html";
 
 const connectionFields = [
-  { key: "name", label: "Connection name", placeholder: "Standard", help: undefined },
   {
     key: "controllerUrl",
-    label: "HTTPS URL",
+    label: "Gateway HTTPS URL",
     placeholder: "https://sandbox.example.internal",
-    help: "Ask your administrator for the private HTTPS endpoint. The Paseo daemon must be able to reach it over HTTP/2. After entering the URL and file paths, select Save connection, then Check connection.",
+    help: "Ask your administrator for the private Gateway HTTPS endpoint. The Paseo daemon must be able to reach it over HTTP/2. After entering the URL and file paths, select Check connection, then Save Gateway.",
   },
   {
     key: "tokenFile",
     label: "Token file on the daemon",
-    placeholder: "/path/to/controller.token",
-    help: "Ask your administrator to issue an endpoint token and provide the absolute path to its file on the Paseo daemon. If the daemon runs in a container, use the path inside that container. From the daemon environment, run test -r /path/to/controller.token to check readability without printing the token.",
+    placeholder: "/path/to/gateway.token",
+    help: "Ask your administrator to issue an Gateway token and provide the absolute path to its file on the Paseo daemon. If the daemon runs in a container, use the path inside that container. From the daemon environment, run test -r /path/to/gateway.token to check readability without printing the token.",
   },
   {
     key: "caFile",
     label: "CA file on the daemon (optional)",
-    placeholder: "/path/to/controller-ca.crt",
-    help: "If the endpoint uses a private CA that the daemon does not already trust, ask your administrator for its PEM certificate and the absolute path to the mounted file inside the daemon environment. Run test -r /path/to/controller-ca.crt there to check readability. Leave this field blank if the daemon already trusts the CA.",
+    placeholder: "/path/to/gateway-ca.crt",
+    help: "If the endpoint uses a private CA that the daemon does not already trust, ask your administrator for its PEM certificate and the absolute path to the mounted file inside the daemon environment. Run test -r /path/to/gateway-ca.crt there to check readability. Leave this field blank if the daemon already trusts the CA.",
   },
 ] as const;
 
@@ -55,21 +54,15 @@ const statusLabels = {
 
 type ControllerCheck = z.infer<typeof controllerCheck.output>;
 
-function typeLabel(type: ControllerCheck["type"]) {
-  if (type === "gateway") return "Gateway";
-  if (type === "controller") return "Controller";
-  return "Unknown";
-}
-
 function profileAvailability(connection: NamedConnection, result: ControllerCheck | null | undefined) {
-  if (!isConfigured(connection)) return "Set the HTTPS URL and token file in Connections.";
+  if (!isConfigured(connection)) return "Set the HTTPS URL and token file in Gateway.";
   if (result === undefined) return "Checking for authorized profiles…";
   if (result === null) return "Profile discovery failed.";
   const reach = result.checks.find(({ id }) => id === "reach");
   const auth = result.checks.find(({ id }) => id === "auth");
   if (reach?.status === "fail") return "Endpoint unreachable.";
   if (auth?.status === "fail") return auth.detail;
-  if (auth?.status !== "ok") return "Check the endpoint and credential files in Connections.";
+  if (auth?.status !== "ok") return "Check the endpoint and credential files in Gateway.";
   return result.profiles.length === 0 ? "No profiles authorized for this token." : null;
 }
 
@@ -121,7 +114,7 @@ function ProfileResources({ resources, theme, compact }: {
 }
 
 function blankConnection(id: string, name = ""): NamedConnection {
-  return { id, name, controllerUrl: "", tokenFile: "", caFile: "" };
+  return { id, name, gateway: true, controllerUrl: "", tokenFile: "", caFile: "" };
 }
 
 export function SandboxScreen({ theme, layout }: PluginScreenProps) {
@@ -192,6 +185,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
 
   if (settings.status === "loading") return <Loading />;
   const config = settings.status === "ready" ? settings.values : settingsSchema.parse({});
+  const migrating = needsGatewayMigration(config);
+  const gateway = migrating ? undefined : config.connections[0];
   const validated = editor && namedConnectionSchema.safeParse(editor.connection);
   const available = config.connections.filter(({ id }) => checks?.get(id)?.profiles.length);
   const text = { color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 21 };
@@ -254,45 +249,24 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           {tab === "connection" && <Card theme={theme} icon="Shield" title="Execution policy" description="Applies to new launches on this Paseo host.">
             <SettingsSwitch label="Require a sandbox profile"
               hint="Require an authorized profile for workspace agent sessions, terminals and setup commands. Existing sessions and unassigned workspace history and teardown stay available."
-              value={config.requireSandboxProfile} disabled={busy || settings.status !== "ready"}
+              value={config.requireSandboxProfile} disabled={busy || migrating || settings.status !== "ready"}
               onValueChange={(required) => void action(() => save({ ...config, requireSandboxProfile: required }))} />
           </Card>}
-          {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Connections" description="Use the private endpoints and credential files provided by your administrator.">
-            {config.connections.length > 0 && (
-              <View role="table" accessibilityLabel="Saved sandbox connections" style={tableFrame}>
-                <View role="row" style={tableHeader}>
-                  <Text role="columnheader" style={[text, connectionTable.name, table.heading]}>Name</Text>
-                  <Text role="columnheader" style={[text, connectionTable.id, table.heading]}>ID</Text>
-                  <Text role="columnheader" style={[text, connectionTable.type, table.heading]}>Type</Text>
-                  <Text role="columnheader" style={[text, connectionTable.actions, table.heading, connectionTable.actionsHeading]}>Actions</Text>
-                </View>
-                {config.connections.map((connection) => (
-                  <View key={connection.id} role="row" style={tableRow}>
-                    <Text role="cell" style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
-                    <Text role="cell" style={[text, connectionTable.id]}>{connection.id}</Text>
-                    <Text role="cell" style={[text, connectionTable.type]}>{typeLabel(checks?.get(connection.id)?.type)}</Text>
-                    <View role="cell" style={connectionTable.actions}>
-                      <Button theme={theme} label="Edit" accessibilityLabel={`Edit ${connection.name}`} disabled={busy}
-                        onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
+          {migrating && <Text accessibilityRole="alert" style={text}>
+            Saved workspace assignments are waiting for Gateway migration. Ask your administrator to confirm that the Gateway is ready and old sandboxes have stopped, then open Gateway to migrate.
+          </Text>}
+          {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Gateway" description="Use the Gateway URL and one credential provided by your administrator.">
+            {gateway && <Text style={text}>{gateway.controllerUrl}</Text>}
             {!editor && (
-              <Button theme={theme} label="Add connection" disabled={busy || config.connections.length >= 20}
+              <Button theme={theme} label={migrating ? "Migrate to Gateway" : gateway ? "Edit or check Gateway" : "Set up Gateway"}
+                disabled={busy}
                 onPress={() => {
-                  const standard = !config.connections.some(({ id }) => id === standardConnectionId);
-                  setEditor({ connection: standard ? blankConnection(standardConnectionId, "Standard") : blankConnection(""), existing: false });
+                  setEditor({ connection: gateway ?? blankConnection(standardConnectionId, "Gateway"), existing: Boolean(gateway) });
                   setEditorCheck(null);
                 }} />
             )}
             {editor && (
               <View style={{ gap: 12 }}>
-                <Field theme={theme} label="Connection ID" placeholder="docker-lab" value={editor.connection.id}
-                  disabled={busy || editor.existing}
-                  error={validated ? validated.error?.issues.find(({ path }) => path[0] === "id")?.message : undefined}
-                  onChange={(id) => { setEditor({ ...editor, connection: { ...editor.connection, id } }); setEditorCheck(null); }} />
                 {connectionFields.map(({ key, label, placeholder, help }) => (
                   <Field key={key} theme={theme} label={label} placeholder={placeholder} value={editor.connection[key]} disabled={busy}
                     help={help && (
@@ -308,29 +282,28 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   <Button theme={theme} label="Cancel" disabled={busy} onPress={() => setEditor(null)} />
                   <Button theme={theme} label="Check connection" disabled={busy || !validated?.success}
                     onPress={() => void action(async () => setEditorCheck(await check(editor.connection)))} />
-                  <Button theme={theme} label="Save connection" primary disabled={busy || !validated?.success}
+                  <Button theme={theme} label={migrating ? "Migrate saved assignments" : "Save Gateway"} primary disabled={busy || !validated?.success}
                     onPress={() => void action(async () => {
                       if (!validated?.success) return;
                       const connection = validated.data;
-                      if (!editor.existing && config.connections.some(({ id }) => id === connection.id)) {
-                        throw new Error("Choose a unique connection ID.");
-                      }
                       await save({
                         ...config,
-                        connections: editor.existing
-                          ? config.connections.map((old) => old.id === connection.id ? connection : old)
-                          : [...config.connections, connection],
+                        connections: [connection],
+                        workspaces: migrating ? config.workspaces.map((workspace) => ({
+                          ...workspace,
+                          connectionId: connection.id,
+                          privileged: workspace.profile ? workspace.privileged ?? (workspace.profile === "docker") : workspace.privileged,
+                        })) : config.workspaces,
                       });
                       setEditor(null);
                     })} />
                   {editor.existing && !config.workspaces.some(({ connectionId }) => connectionId === editor.connection.id) && (
-                    <Button theme={theme} label="Remove connection" disabled={busy} onPress={() => void action(async () => {
+                    <Button theme={theme} label="Remove Gateway" disabled={busy} onPress={() => void action(async () => {
                       await save({ ...config, connections: config.connections.filter(({ id }) => id !== editor.connection.id) });
                       setEditor(null);
                     })} />
                   )}
                 </View>
-                {editorCheck?.type && <Text style={text}>Type · {typeLabel(editorCheck.type)}</Text>}
                 {editorCheck?.checks.map(({ id, label, status, detail }) => (
                   <View key={id} style={{ gap: 4 }}>
                     <Badge theme={theme} label={label + " · " + (status === "ok" ? "Verified" : status === "fail" ? "Failed" : "Skipped")}
@@ -342,8 +315,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             )}
           </Card>}
 
-          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each connection’s saved token. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
-            {config.connections.length === 0 && <Text style={text}>Add a connection to see its profiles.</Text>}
+          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles authorized by your Gateway credential. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
+            {config.connections.length === 0 && <Text style={text}>Set up the Gateway to see available profiles.</Text>}
             {profileRows.length > 0 && (
               <View role="table" accessibilityLabel="Available profiles" style={tableFrame}>
                 <View role="row" style={[tableHeader, profileRow]}>
@@ -382,11 +355,11 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             ))}
           </Card>}
 
-          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a connection and sandbox profile for each workspace.">
+          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a sandbox profile for each workspace.">
             <Button theme={theme} label="Refresh status" disabled={busy || settings.status !== "ready"}
               onPress={() => void action(async () => setRows((await list({})).workspaces))} />
             {rows?.length === 0 && <Text style={text}>No workspaces on this host.</Text>}
-            {!available.length && rows?.length ? <Text style={text}>Save a connection that grants access to at least one profile.</Text> : null}
+            {!available.length && rows?.length ? <Text style={text}>Save a Gateway credential that grants access to at least one profile.</Text> : null}
             {rows?.map((row) => {
               const route = workspaceRoute(config, row.id);
               const chosen = route && checks?.get(route.connection.id)?.profiles.find(({ id, privileged }) =>
@@ -403,17 +376,16 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                     <Badge theme={theme} label={route ? statusLabels[row.sandbox] : config.requireSandboxProfile ? "Profile required" : "Runs on daemon"}
                       tone={row.sandbox === "running" ? "success" : "muted"} />
-                    {route && <Badge theme={theme} label={route.connection.name} />}
                     {chosen && <Badge theme={theme} label={chosen.label} tone={chosen.privileged ? "warning" : "muted"} />}
                     {route && !chosen && <Text style={text}>{route.workspace.profile ? `Saved profile: ${route.workspace.profile}` : "Choose a profile"}</Text>}
                   </View>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                     {!hasSandbox && !choosing && (
-                      <Button theme={theme} label={route ? "Change connection or profile" : "Enable sandbox"}
+                      <Button theme={theme} label={route ? "Change profile" : "Enable sandbox"}
                         disabled={busy || !available.length}
                         onPress={() => {
                           setConfirmation(null);
-                          choose(row.id, route?.connection.id ?? standardConnectionId, chosen?.id);
+                          choose(row.id, route?.connection.id ?? gateway?.id ?? standardConnectionId, chosen?.id);
                         }} />
                     )}
                     {route && hasSandbox && row.sandbox !== "stopping" && !confirming && (
@@ -426,7 +398,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     )}
                   </View>
                   {route && hasSandbox && !confirming && (
-                    <Text style={text}>Stop the sandbox and wait for No sandbox before changing its connection or profile.</Text>
+                    <Text style={text}>Stop the sandbox and wait for No sandbox before changing its profile.</Text>
                   )}
                   {confirming && (
                     <View style={{ gap: 8 }}>
@@ -444,12 +416,6 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   )}
                   {choosing && (
                     <View style={{ gap: 8 }}>
-                      <View accessibilityRole="radiogroup">
-                        {available.map(({ id, name }) => (
-                          <Choice key={id} theme={theme} role="radio" label={`${name} (${id})`} checked={id === choosing.connectionId}
-                            disabled={busy} onChange={() => choose(row.id, id)} />
-                        ))}
-                      </View>
                       <View accessibilityRole="radiogroup">
                         {choices.map((profile) => (
                           <Choice key={profile.id} theme={theme} role="radio" label={profile.label} checked={profile.id === choosing.profile}
@@ -497,15 +463,6 @@ const table = StyleSheet.create({
     paddingVertical: 4,
   },
 });
-
-const connectionTable = StyleSheet.create({
-  name: { flex: 3, minWidth: 0 },
-  id: { flex: 2.5, minWidth: 0 },
-  type: { flex: 2.5, minWidth: 0 },
-  actions: { width: 60, alignItems: "flex-end" },
-  actionsHeading: { textAlign: "right" },
-});
-
 
 const profileTable = StyleSheet.create({
   profile: { flex: 3, minWidth: 0 },

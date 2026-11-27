@@ -62,8 +62,10 @@ export default function contribute(server: PluginServerContext) {
     const rows = await Promise.all(
       list.entries.map(async (w) => {
         const route = workspaceRoute(c, w.id);
-        const sandbox = route && isConfigured(route.connection)
-          ? await getSandbox(route.connection, w.id).then(state, () => "unknown" as const)
+        const sandbox = route
+          ? isConfigured(route.connection)
+            ? await getSandbox(route.connection, w.id).then(state, () => "unknown" as const)
+            : "unknown" as const
           : "absent" as const;
         return { id: w.id, name: w.name, directory: w.workspaceDirectory ?? w.projectRootPath, sandbox };
       }),
@@ -79,7 +81,7 @@ export default function contribute(server: PluginServerContext) {
         throw new Error("Workspace routing changed or is being saved. Refresh and confirm the stop again.");
       }
       const route = workspaceRoute(current.values, workspaceId);
-      if (!route || !isConfigured(route.connection)) throw new Error("This workspace has no configured controller connection.");
+      if (!route || !isConfigured(route.connection)) throw new Error("This workspace has no configured Gateway connection.");
       await stopSandbox(route.connection, workspaceId);
       return {};
     } finally {

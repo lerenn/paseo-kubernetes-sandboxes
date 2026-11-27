@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# < 2 )); then
+  echo "Usage: helm-installation VALUES.yaml gateway|standard|docker [HELM_ARGS...]" >&2
+  exit 64
+fi
+values=$1
+component=$2
+shift 2
+
+case "$component" in
+  gateway) role=gateway ;;
+  standard|docker) role=backend ;;
+  *) echo "Select gateway, standard or docker." >&2; exit 64 ;;
+esac
+
+select_values() {
+  PASEO_HELM_COMPONENT="$component" PASEO_HELM_ROLE="$role" yq eval -e '
+    (.shared // {} | pick(["image", "imageRepository", "imagePullSecrets", "internalTLS"])) *
+    (.releases[strenv(PASEO_HELM_COMPONENT)] | select(kind == "map")) |
+    .installation.role = strenv(PASEO_HELM_ROLE)
+  ' -- "$values"
+}
+
+if (( $# == 0 )); then
+  select_values
+  exit
+fi
+
+# Pass only the selected configuration to Helm, including what its release Secret stores.
+filtered=$(mktemp)
+trap 'rm -f -- "$filtered"' EXIT
+select_values > "$filtered"
+helm "$@" --values "$filtered"

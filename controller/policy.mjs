@@ -99,26 +99,43 @@ export function createPolicy(config) {
 
   const principals = new Map();
   const tokens = new Set();
+  const allowDirect = config.allowDirect === true;
   for (const [name, principal] of Object.entries(config.principals ?? {})) {
-    if (!identifier.test(name) || !/^[a-f0-9]{64}$/.test(principal?.tokenSha256 ?? "") ||
+    const { gatewayIdentity, tokenSha256 } = principal ?? {};
+    if (!identifier.test(name) ||
+        (gatewayIdentity !== undefined && (typeof gatewayIdentity !== "string" ||
+          !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(gatewayIdentity))) ||
+        (!gatewayIdentity && !(allowDirect && tokenSha256)) ||
+        (tokenSha256 !== undefined && (!allowDirect || !/^[a-f0-9]{64}$/.test(tokenSha256))) ||
         !Array.isArray(principal.profiles) || !principal.profiles.length ||
         principal.profiles.some((profile) => !profiles.has(profile)) ||
         tokens.has(principal.tokenSha256)) {
-      throw new Error("Each principal requires a unique SHA-256 token digest and access to configured profiles.");
+      throw new Error("Each principal requires a Gateway certificate identity and profile grants. Direct migration tokens require explicit opt-in.");
     }
-    tokens.add(principal.tokenSha256);
-    principals.set(name, { hash: Buffer.from(principal.tokenSha256, "hex"), profiles: new Set(principal.profiles) });
+    if (tokenSha256) tokens.add(tokenSha256);
+    principals.set(name, {
+      gatewayIdentity,
+      hash: tokenSha256 ? Buffer.from(tokenSha256, "hex") : undefined,
+      profiles: new Set(principal.profiles),
+    });
   }
   if (!principals.size) throw new Error("Configure at least one controller principal.");
 
   return {
-    authenticate(authorization) {
+    authenticateGateway(socket, name) {
+      const identity = principals.get(name)?.gatewayIdentity;
+      if (!identity || !socket.authorized) return null;
+      const certificate = socket.getPeerX509Certificate();
+      return certificate?.checkHost(identity, { subject: "never", wildcards: false }) === identity ? name : null;
+    },
+    authenticateDirect(authorization) {
+      if (!allowDirect) return null;
       const token = /^Bearer ([A-Za-z0-9_-]{43,256})$/.exec(authorization ?? "")?.[1];
       if (!token) return null;
       const hash = digest(token);
       let match = null;
       for (const [name, principal] of principals) {
-        if (timingSafeEqual(hash, principal.hash)) match = name;
+        if (principal.hash && timingSafeEqual(hash, principal.hash)) match = name;
       }
       return match;
     },

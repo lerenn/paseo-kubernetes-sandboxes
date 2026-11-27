@@ -1,29 +1,69 @@
-{{- if .Values.controller.enabled }}
+{{- if eq .Values.installation.role "backend" }}
 {{- $name := printf "%s-sandbox-controller" .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- $tlsName := default (printf "%s-tls" $name) .Values.tlsSecretName }}
-{{- if not .Values.tlsSecretName }}
-{{- /* No Secret supplied: generate a private CA and a serving certificate once, and keep them across upgrades. */}}
+{{- $managedTLS := printf "%s-mtls" $name | trunc 63 | trimSuffix "-" }}
+{{- $controller := .Values.controller }}
+{{- $servingSecret := coalesce $controller.tlsSecretName .Values.tlsSecretName }}
+{{- $tlsName := default $managedTLS $servingSecret }}
+{{- $profiles := .Values.profiles }}
+{{- if kindIs "map" $controller.profiles }}
+{{- $profiles = $controller.profiles }}
+{{- end }}
+{{- $principals := .Values.principals }}
+{{- if kindIs "map" $controller.principals }}
+{{- $principals = $controller.principals }}
+{{- end }}
+{{- $resources := dict "requests" (dict "cpu" "50m" "memory" "64Mi") "limits" (dict "memory" "256Mi") }}
+{{- if kindIs "map" $controller.resources }}
+{{- $resources = $controller.resources }}
+{{- else if kindIs "map" .Values.resources }}
+{{- $resources = .Values.resources }}
+{{- end }}
+{{- if .Values.controller.retainLegacyServingTLS }}
+{{- $tlsName = printf "%s-tls" $name }}
+{{- end }}
+{{- if and $servingSecret .Values.controller.retainLegacyServingTLS }}
+{{- fail "Use either controller.tlsSecretName or controller.retainLegacyServingTLS." }}
+{{- end }}
+{{- if .Values.controller.retainLegacyServingTLS }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $tlsName }}
-{{- $crt := "" }}{{- $key := "" }}{{- $ca := "" }}
-{{- if $existing }}
-{{- $crt = index $existing.data "tls.crt" }}{{- $key = index $existing.data "tls.key" }}{{- $ca = index $existing.data "ca.crt" }}
-{{- else }}
-{{- $authority := genCA (printf "%s-ca" $name) 3650 }}
-{{- $hosts := list $name (printf "%s.%s" $name .Release.Namespace) (printf "%s.%s.svc" $name .Release.Namespace) (printf "%s.%s.svc.cluster.local" $name .Release.Namespace) }}
-{{- $cert := genSignedCert $name nil $hosts 3650 $authority }}
-{{- $crt = b64enc $cert.Cert }}{{- $key = b64enc $cert.Key }}{{- $ca = b64enc $authority.Cert }}
+{{- if not $existing }}
+{{- fail "Legacy serving TLS requires a live Helm lookup of the existing Secret. For Argo use an existing externally managed TLS Secret." }}
 {{- end }}
 apiVersion: v1
 kind: Secret
 type: kubernetes.io/tls
 metadata:
   name: {{ $tlsName }}
-data:
-  tls.crt: {{ $crt }}
-  tls.key: {{ $key }}
-  ca.crt: {{ $ca }}
+  annotations:
+    helm.sh/resource-policy: keep
+data: {{ $existing.data | toJson }}
 ---
 {{- end }}
+{{- $caSecret := .Values.controller.gatewayClientCASecretName }}
+{{- if or (eq $tlsName $managedTLS) (not $caSecret) }}
+{{- $caSecret = default $managedTLS $caSecret }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+spec:
+  secretName: {{ $managedTLS }}
+  issuerRef:
+    name: {{ required "Set internalTLS.issuerName or supply both controller.tlsSecretName and controller.gatewayClientCASecretName." .Values.internalTLS.issuerName | quote }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ $name | quote }}
+    - {{ printf "%s.%s" $name .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc" $name .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $name .Release.Namespace | quote }}
+  duration: 24h
+  renewBefore: 8h
+  usages: [digital signature, key encipherment, server auth]
+  privateKey:
+    rotationPolicy: Always
+---
+{{- end }}
+{{- $config := dict "profiles" (required "Configure at least one sandbox profile." $profiles) "principals" (required "Configure at least one controller principal." $principals) "allowDirect" .Values.controller.allowDirectMigration | toJson }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -63,7 +103,7 @@ kind: ConfigMap
 metadata:
   name: {{ $name }}
 data:
-  config.json: {{ dict "profiles" (required "Configure at least one sandbox profile." .Values.profiles) "principals" (required "Configure at least one controller principal." .Values.principals) | toJson | quote }}
+  config.json: {{ $config | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -81,7 +121,7 @@ spec:
       labels:
         app.kubernetes.io/name: {{ $name }}
       annotations:
-        checksum/config: {{ list .Values.profiles .Values.principals | toJson | sha256sum | quote }}
+        checksum/config: {{ $config | sha256sum | quote }}
     spec:
       serviceAccountName: {{ $name }}
       {{- with .Values.imagePullSecrets }}
@@ -96,6 +136,8 @@ spec:
               value: /config/config.json
             - name: CONTROLLER_SERVICE
               value: {{ $name | quote }}
+            - name: GATEWAY_CLIENT_CA_FILE
+              value: /gateway-trust/ca.crt
             - name: SANDBOX_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -104,10 +146,8 @@ spec:
             - name: https
               containerPort: 8443
           readinessProbe:
-            httpGet:
-              scheme: HTTPS
+            tcpSocket:
               port: https
-              path: /healthz
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -118,13 +158,16 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml $resources | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /config
               readOnly: true
             - name: tls
               mountPath: /tls
+              readOnly: true
+            - name: gateway-trust
+              mountPath: /gateway-trust
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -134,7 +177,13 @@ spec:
             name: {{ $name }}
         - name: tls
           secret:
-            secretName: {{ $tlsName }}
+            secretName: {{ $tlsName | quote }}
+        - name: gateway-trust
+          secret:
+            secretName: {{ $caSecret | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
         - name: tmp
           emptyDir: {}
 ---

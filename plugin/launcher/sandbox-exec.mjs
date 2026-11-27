@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Launch wrapper: runs "<command> [args...]" in a sandbox through the Paseo sandbox controller.
+// Launch wrapper: runs "<command> [args...]" in a sandbox through the Paseo sandbox Gateway.
 // Paseo starts it as `sandbox-exec.mjs <options> -- <command> [args...]`.
 //
-//   --url URL          controller HTTPS base URL
-//   --token-file FILE  file holding the scoped controller token (never passed on the command line)
-//   --ca-file FILE     CA certificate that signed the controller's certificate (optional)
+//   --url URL          Gateway HTTPS base URL
+//   --token-file FILE  file holding the scoped Gateway token (never passed on the command line)
+//   --ca-file FILE     CA certificate that signed the Gateway's certificate (optional)
 //   --workspace ID     workspace id of the sandbox
 //   --profile ID       expected profile of the sandbox
 //   --privileged BOOL  expected privilege level of the sandbox
@@ -44,9 +44,9 @@ if (!options.url || !options.tokenFile || !options.workspace || !options.cwd) fa
 if (!command.length) fail("no command given");
 
 let url;
-try { url = new URL(options.url); } catch { fail("invalid controller URL"); }
+try { url = new URL(options.url); } catch { fail("invalid Gateway URL"); }
 if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-  fail("the controller URL must be an HTTPS origin");
+  fail("the Gateway URL must be an HTTPS origin");
 }
 let token;
 try {
@@ -54,7 +54,7 @@ try {
 } catch {
   fail("could not read the token file");
 }
-if (!/^[A-Za-z0-9_-]{43,256}$/.test(token)) fail("invalid controller token");
+if (!/^[A-Za-z0-9_-]{43,256}$/.test(token)) fail("invalid Gateway token");
 let ca;
 try {
   ca = options.caFile ? readFileSync(options.caFile) : undefined;
@@ -77,25 +77,57 @@ const frame = (type, payload = Buffer.alloc(0)) => {
 const json = (value) => Buffer.from(JSON.stringify(value));
 const size = () => ({ cols: process.stdout.columns || 80, rows: process.stdout.rows || 24 });
 
-const session = connect(url.origin, { ca });
-session.on("error", (error) => connectionError("could not reach the controller", error));
+const session = connect(url.origin, { ca, rejectUnauthorized: true });
+const preflightError = () => {};
+session.on("error", preflightError);
+try {
+  // Verify the versioned Gateway endpoint on this same TLS session before sending the token.
+  await new Promise((resolve, reject) => {
+    const probe = session.request({ ":method": "GET", ":path": "/v1/gateway/healthz" });
+    const timer = setTimeout(() => probe.destroy(new Error("Gateway verification timed out")), 10_000).unref();
+    let status;
+    let body = "";
+    probe.setEncoding("utf8");
+    probe.on("response", (headers) => { status = headers[":status"]; });
+    probe.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1024) probe.destroy(new Error("Gateway verification response is too large"));
+    });
+    probe.once("error", reject);
+    probe.once("close", () => clearTimeout(timer));
+    probe.once("end", () => {
+      try {
+        const result = JSON.parse(body);
+        if (status === 200 && result?.ok === true && result.type === "gateway") return resolve();
+      } catch {}
+      reject(new Error("Gateway verification failed"));
+    });
+    probe.end();
+  });
+} catch {
+  session.destroy();
+  fail("the HTTPS endpoint did not verify as a Sandbox Gateway", 77);
+}
 const stream = session.request({
   ":method": "POST",
   ...(options.privileged === undefined ? {} : { "x-paseo-sandbox-privileged": options.privileged }),
   ...(options.profile ? { "x-paseo-sandbox-profile": options.profile } : {}),
-  ":path": `/v1/sandboxes/${encodeURIComponent(options.workspace)}/exec`,
+  ":path": `/v1/gateway/sandboxes/${encodeURIComponent(options.workspace)}/exec`,
   authorization: `Bearer ${token}`,
   "content-type": "application/octet-stream",
 });
-stream.on("error", (error) => connectionError("connection to the controller failed", error));
+stream.on("error", (error) => connectionError("connection to the Gateway failed", error));
 stream.write(frame(REQUEST.START, json({ command, cwd: options.cwd, env, tty, ...(tty ? size() : {}) })));
+
+session.off("error", preflightError);
+session.on("error", (error) => connectionError("could not reach the Gateway", error));
 
 let exited = false;
 let buffer = Buffer.alloc(0);
 let httpStatus = 0;
 const errorBody = [];
 
-const responseTimer = setTimeout(() => connectionError("timed out waiting for the controller"), 45_000).unref();
+const responseTimer = setTimeout(() => connectionError("timed out waiting for the Gateway"), 45_000).unref();
 
 function connectionError(message, error) {
   if (exited) return;
@@ -143,12 +175,12 @@ stream.on("data", (chunk) => {
 stream.on("end", () => {
   if (exited) return;
   if (httpStatus !== 200) {
-    let message = `the controller answered ${httpStatus || "nothing"}`;
+    let message = `the Gateway answered ${httpStatus || "nothing"}`;
     try { message = JSON.parse(Buffer.concat(errorBody).toString()).error || message; } catch {}
     process.stderr.write(`sandbox-exec: ${message}\n`);
     return leave(httpStatus === 401 || httpStatus === 403 ? 77 : 125);
   }
-  process.stderr.write("sandbox-exec: the controller ended the stream early\n");
+  process.stderr.write("sandbox-exec: the Gateway ended the stream early\n");
   leave(255);
 });
 
