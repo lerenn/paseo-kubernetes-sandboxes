@@ -72,44 +72,89 @@ const resourceLabels = [
   ["ephemeral-storage", "Ephemeral storage"],
 ] as const;
 
-function ProfileResources({ resources, theme, compact }: {
-  resources: SandboxProfile["resources"];
+const resourceColumns = [
+  ["requests", "Request"],
+  ["limits", "Limit"],
+] as const;
+
+const profileColumns = [
+  ["profile", "Profile"],
+  ["id", "ID"],
+  ["controller", "Controller"],
+  ["privilege", "Privilege"],
+  ["container", "Container"],
+] as const;
+
+function ProfilesTable({ rows, theme }: {
+  rows: { connection: NamedConnection; profile: SandboxProfile }[];
   theme: PluginScreenProps["theme"];
-  compact: boolean;
 }) {
   const text = { color: theme.colors.foregroundMuted, fontSize: 13 };
+  const primary = { color: theme.colors.foreground };
   const heading = [text, table.heading];
+  const border = { borderColor: theme.colors.border };
+  const row = [table.row, profileTable.row];
   return (
-    <View role="cell" style={[profileTable.resources, compact && profileTable.compactResources]}>
-      {compact && <Text style={heading}>Container resources</Text>}
-      {resources === undefined ? <Text style={text}>Unavailable from controller</Text> : (
-        <>
-          <View style={profileTable.resourceLine}>
-            <View style={profileTable.resourceName} />
-            <Text style={[heading, profileTable.quantity]}>Request</Text>
-            <Text style={[heading, profileTable.quantity]}>Limit</Text>
+    <ScrollView horizontal style={profileTable.scroll} contentContainerStyle={profileTable.content}>
+      <View role="table" accessibilityLabel="Available profiles" style={[table.frame, border, profileTable.frame]}>
+        <View role="rowgroup" style={{ backgroundColor: theme.colors.surface2 }}>
+          <View role="row" style={[row, profileTable.groupHeader]}>
+            {profileColumns.map(([key, label]) => (
+              <Text key={key} role="columnheader" aria-rowspan={2} style={[heading, profileTable[key]]}>{label}</Text>
+            ))}
+            {resourceLabels.map(([key, label]) => (
+              <Text key={key} role="columnheader" aria-colspan={2} style={[heading, primary, profileTable.resourceGroup, profileTable.groupLabel]}>{label}</Text>
+            ))}
           </View>
-          {resources.map(({ kind, name, requests, limits }) => (
-            <View key={JSON.stringify([kind, name])} style={{ gap: 2 }}>
-              <Text style={[heading, { color: theme.colors.foreground }]}>
-                {kind === "main" ? "Main container" : kind === "init" ? `Init container (${name})` : `Sidecar (${name})`}
-              </Text>
-              {resourceLabels.map(([key, label]) => (
-                <View key={key} style={profileTable.resourceLine}>
-                  <Text style={[text, profileTable.resourceName]}>{label}</Text>
-                  <Text accessibilityLabel={`${label} request: ${requests[key] ?? "Unset"}`} style={[text, profileTable.quantity]}>
-                    {requests[key] ?? "Unset"}
-                  </Text>
-                  <Text accessibilityLabel={`${label} limit: ${limits[key] ?? "Unset"}`} style={[text, profileTable.quantity]}>
-                    {limits[key] ?? "Unset"}
-                  </Text>
+          <View role="row" style={[row, profileTable.subHeader]}>
+            {profileColumns.map(([key]) => <View key={key} aria-hidden style={profileTable[key]} />)}
+            {resourceLabels.map(([key, label]) => (
+              <View key={key} role="presentation" style={profileTable.resourceGroup}>
+                {resourceColumns.map(([field, title]) => (
+                  <Text key={field} role="columnheader" accessibilityLabel={`${label} ${title.toLowerCase()}`} style={[heading, profileTable.quantity]}>{title}</Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        </View>
+        {rows.map(({ connection, profile }) => (
+          <View key={JSON.stringify([connection.id, profile.id])} role="rowgroup" style={[table.divider, border]}>
+            {(profile.resources?.length ? profile.resources : [undefined]).map((container, index) => (
+              <View key={container ? JSON.stringify([container.kind, container.name]) : "missing"} role="row" style={row}>
+                <Text role="cell" style={[text, primary, profileTable.profile]}>{index === 0 ? profile.label : null}</Text>
+                <Text role="cell" style={[text, profileTable.id]}>{index === 0 ? profile.id : null}</Text>
+                <View role="cell" style={[profileTable.controller, profileTable.controllerCell]}>
+                  {index === 0 && <>
+                    <Icon name={controllerIcon} size={14} color={theme.colors.foregroundMuted} />
+                    <View style={profileTable.controllerLabel}>
+                      <Text style={[text, primary]}>{profile.controller ?? connection.name}</Text>
+                      <Text style={text}>{profile.controller ? `via ${connection.name} (${connection.id})` : connection.id}</Text>
+                    </View>
+                  </>}
                 </View>
-              ))}
-            </View>
-          ))}
-        </>
-      )}
-    </View>
+                <View role="cell" style={profileTable.privilege}>
+                  {index === 0 && profile.privileged && <Badge theme={theme} label="Privileged" tone="warning" />}
+                </View>
+                <Text role="cell" style={[text, primary, profileTable.container]}>
+                  {container?.kind === "main" && "Main container"}
+                  {container?.kind === "sidecar" && `Sidecar (${container.name})`}
+                  {container?.kind === "init" && `Init container (${container.name})`}
+                  {profile.resources?.length === 0 && "No containers reported"}
+                </Text>
+                {resourceLabels.map(([key, label]) => (
+                  <View key={key} role="presentation" style={profileTable.resourceGroup}>
+                    {resourceColumns.map(([field, title]) => {
+                      const value = container ? container[field][key] ?? "Unset" : "Unavailable";
+                      return <Text key={field} role="cell" accessibilityLabel={`${label} ${title.toLowerCase()}: ${value}`} style={[text, profileTable.quantity]}>{value}</Text>;
+                    })}
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -197,10 +242,6 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     setSelection({ workspace, connectionId, profile: profile ?? standard?.id });
   }
 
-  const tableFrame = [table.frame, { borderColor: theme.colors.border }];
-  const tableHeader = [table.row, table.header, { backgroundColor: theme.colors.surface2 }];
-  const tableRow = [table.row, table.divider, { borderColor: theme.colors.border }];
-  const profileRow = layout.compact ? table.compact : undefined;
   const profileSources = tab === "profiles" ? config.connections.map((connection) => {
     const result = checks?.get(connection.id);
     return { connection, result, status: profileAvailability(connection, result) };
@@ -244,7 +285,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
         </ScrollView>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
-        <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
+        <View style={{ width: "100%", maxWidth: tab === "profiles" ? undefined : 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
           {tab === "connection" && <Card theme={theme} icon="Shield" title="Execution policy" description="Applies to new launches on this Paseo host.">
             <SettingsSwitch label="Require a sandbox profile"
@@ -317,34 +358,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
 
           {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles authorized by your Gateway credential. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
             {config.connections.length === 0 && <Text style={text}>Set up the Gateway to see available profiles.</Text>}
-            {profileRows.length > 0 && (
-              <View role="table" accessibilityLabel="Available profiles" style={tableFrame}>
-                <View role="row" style={[tableHeader, profileRow]}>
-                  <Text role="columnheader" style={[text, table.heading, profileTable.profile]}>Profile</Text>
-                  <Text role="columnheader" style={[text, table.heading, profileTable.id]}>ID</Text>
-                  <Text role="columnheader" style={[text, table.heading, profileTable.controller]}>Controller</Text>
-                  <Text role="columnheader" style={[text, table.heading, profileTable.privilege]}>Privilege</Text>
-                  {!layout.compact && <Text role="columnheader" style={[text, table.heading, profileTable.resources]}>Container resources</Text>}
-                </View>
-                {profileRows.map(({ connection, profile }) => (
-                  <View key={JSON.stringify([connection.id, profile.id])} role="row" style={[tableRow, profileRow, profileTable.bodyRow, layout.compact && profileTable.compactRow]}>
-                    <Text role="cell" style={[text, profileTable.profile, { color: theme.colors.foreground }]}>{profile.label}</Text>
-                    <Text role="cell" style={[text, profileTable.id]}>{profile.id}</Text>
-                    <View role="cell" style={[profileTable.controller, profileTable.controllerCell]}>
-                      <Icon name={controllerIcon} size={14} color={theme.colors.foregroundMuted} />
-                      <View style={profileTable.controllerLabel}>
-                        <Text style={[text, { color: theme.colors.foreground }]}>{profile.controller ?? connection.name}</Text>
-                        <Text style={text}>{profile.controller ? `via ${connection.name} (${connection.id})` : connection.id}</Text>
-                      </View>
-                    </View>
-                    <View role="cell" style={profileTable.privilege}>
-                      {profile.privileged && <Badge theme={theme} label="Privileged" tone="warning" />}
-                    </View>
-                    <ProfileResources resources={profile.resources} theme={theme} compact={layout.compact} />
-                  </View>
-                ))}
-              </View>
-            )}
+            {profileRows.length > 0 && <ProfilesTable rows={profileRows} theme={theme} />}
             {profileSources.map(({ connection, status }) => status && (
               <View key={connection.id} style={[table.divider, { borderColor: theme.colors.border, paddingTop: 12, gap: 4 }]}>
                 <Text role="heading" style={[text, table.heading, { color: theme.colors.foreground }]}>
@@ -450,32 +464,26 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
 
 const table = StyleSheet.create({
   frame: { borderWidth: 1, borderRadius: 8 },
-  header: { borderTopLeftRadius: 7, borderTopRightRadius: 7 },
   divider: { borderTopWidth: 1 },
   heading: { fontWeight: "600" },
-  compact: { gap: 4, paddingHorizontal: 5 },
-
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
+  row: { flexDirection: "row", gap: 8, paddingHorizontal: 10 },
 });
 
 const profileTable = StyleSheet.create({
-  profile: { flex: 3, minWidth: 0 },
-  id: { flex: 2.5, minWidth: 0 },
-  controller: { flex: 3.5, minWidth: 0 },
+  scroll: { flexGrow: 0 },
+  content: { flexGrow: 1 },
+  frame: { flexGrow: 1, minWidth: 1060, overflow: "hidden" },
+  row: { alignItems: "flex-start", paddingVertical: 8 },
+  groupHeader: { paddingBottom: 2 },
+  subHeader: { paddingTop: 0 },
+  profile: { flex: 1.15, minWidth: 95 },
+  id: { flex: 1, minWidth: 80 },
+  controller: { flex: 1.4, minWidth: 125 },
   controllerCell: { flexDirection: "row", alignItems: "center", gap: 4 },
   controllerLabel: { flex: 1, minWidth: 0 },
   privilege: { width: 80 },
-  bodyRow: { alignItems: "flex-start", paddingVertical: 8 },
-  compactRow: { flexWrap: "wrap" },
-  resources: { flex: 6, minWidth: 0, gap: 6 },
-  compactResources: { flexBasis: "100%", flexGrow: 0, paddingTop: 4 },
-  resourceLine: { flexDirection: "row", gap: 4 },
-  resourceName: { flex: 2, minWidth: 0 },
-  quantity: { flex: 1, minWidth: 0 },
+  container: { flex: 1.25, minWidth: 105 },
+  resourceGroup: { flex: 2, minWidth: 160, flexDirection: "row", gap: 8 },
+  groupLabel: { textAlign: "center" },
+  quantity: { flex: 1, minWidth: 0, textAlign: "center", fontVariant: ["tabular-nums"] },
 });
