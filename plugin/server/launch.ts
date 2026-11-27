@@ -1,30 +1,31 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import launcher from "./launcher-source.generated.js";
 import type { Configuration } from "../shared/settings.js";
-import { MAIN_CONTAINER, STATE_DIR } from "../shared/sandbox.js";
 
 export type Wrap = [string, ...string[]];
 
-export const launcherPath = () => join(dirname(fileURLToPath(import.meta.url)), "..", "launcher", "kube-exec.sh");
-
 // The wrap Paseo prepends to the command. It ends with `--` because Paseo appends the command directly.
+// The token is never in the wrap: the launcher reads it from the token file.
 export function buildWrap(
-  c: Pick<Configuration, "context" | "namespace"> & { kubeconfigFile?: string },
-  pod: string,
-  opts: { cwd: string; envNames: string[]; launcher?: string },
+  c: Pick<Configuration, "controllerUrl" | "tokenFile" | "caFile">,
+  workspaceId: string,
+  opts: { cwd: string; envNames: string[] },
 ): Wrap {
   return [
-    opts.launcher ?? launcherPath(),
-    ...(c.kubeconfigFile ? ["--kubeconfig", c.kubeconfigFile] : []),
-    ...(c.context ? ["--context", c.context] : []),
-    "--namespace",
-    c.namespace,
-    "--pod",
-    pod,
-    "--container",
-    MAIN_CONTAINER,
-    "--state-dir",
-    STATE_DIR,
+    // Paseo evaluates the server bundle without a source directory. Keep the launcher in the wrap
+    // so an existing agent can reuse it even after the plugin is reloaded.
+    process.execPath,
+    "--input-type=module",
+    "-e",
+    launcher,
+    "--",
+    "sandbox-exec",
+    "--url",
+    c.controllerUrl,
+    "--token-file",
+    c.tokenFile,
+    ...(c.caFile ? ["--ca-file", c.caFile] : []),
+    "--workspace",
+    workspaceId,
     "--cwd",
     opts.cwd,
     ...opts.envNames.flatMap((n) => ["--env", n]),
@@ -32,5 +33,5 @@ export function buildWrap(
   ];
 }
 
-// Only plain variable names can be forwarded by the launcher.
+// Only plain variable names can be forwarded.
 export const forwardableEnv = (env: Record<string, string>) => Object.keys(env).filter((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k));

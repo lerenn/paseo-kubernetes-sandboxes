@@ -12,54 +12,26 @@
 <nav aria-label="Main navigation"><a href="index.html">Home</a><a href="getting-started.html">Getting started</a><a href="reference.html" aria-current="page">Reference</a><a href="how-it-works.html">How it works</a><a class="gh" href="https://github.com/lerenn/paseo-kubernetes-sandboxes" aria-label="GitHub repository" title="GitHub repository"><svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></nav></div></header>
 <div class="doc">
 <aside class="sidebar"><details class="toc-mobile" open><summary>On this page</summary><nav aria-label="On this page">
-<a href="#settings">Settings</a>
-<a href="#sidecars">Sidecars</a>
-<a href="#hooks">Hooks</a>
-<a href="#pod">Pod</a>
-<a href="#launcher">Launcher</a>
-<a href="#kubeconfig-file">Kubeconfig file</a>
-<a href="#git-over-ssh">Git over SSH</a>
-<details class="grp"><summary><a href="#cluster-admin-tasks">Cluster admin tasks</a></summary><ul><li><a href="#cluster-rights">Cluster rights (optional)</a></li><li><a href="#sharing-the-paseo-worktrees-volume">Sharing the Paseo worktrees volume</a></li><li><a href="#docker-in-a-sandbox-privileged-sidecar">Docker in a sandbox (privileged sidecar)</a></li><li><a href="#who-does-what">Who does what</a></li></ul></details>
-<a href="#rbac">RBAC</a>
-</nav></details></aside>
+    <a href="#connection">Connection</a>
+    <a href="#profiles">Helm profiles</a>
+    <a href="#tokens">Scoped tokens</a>
+    <a href="#workspace-status">Workspace status</a>
+  </nav></details></aside>
 <main id="content">
-<h1>Reference</h1>
-<h2 id="settings">Settings</h2><ul><li><strong>Image</strong>: needs a shell and your tools. Required.</li><li><strong>CPU / memory</strong>: requests and limits of the main container.</li><li><strong>Worktree volume</strong>: claim, mount path (same path in the pod), optional sub path. Required.</li><li><strong>Idle timeout</strong>: minutes before an idle pod is deleted; 0 disables it.</li><li><strong>Environment Secret</strong>: optional Secret exposed as environment variables.</li><li><strong>Sidecars</strong>: named extra containers (image, command, env, resources, readiness probe, state volume, optional privileged flag), enabled by default or per workspace. Docker is a documented example, not a preset.</li><li><strong>Pod overrides</strong>: runtimeClassName, tolerations, nodeSelector, priorityClassName, imagePullSecrets.</li><li><strong>Kubeconfig file, context, namespace</strong>: which identity and where pods are created.</li></ul>
-<h2 id="sidecars">Sidecars</h2><p>See <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#sidecars">Sidecars</a> in the setup guide: fields, a docker example, requirements, and what is not tested. A privileged sidecar is weaker isolation.</p>
-<h2 id="hooks">Hooks</h2><ul><li><code>agent.open.before</code>, <code>terminal.create.before</code>, <code>command.run.before</code>: return <code>wrap</code> for opted-in workspaces.</li><li><code>workspace.archive.after</code>: deletes the workspace's pod.</li></ul>
-<h2 id="pod">Pod</h2><p>Named <code>sbx-&lt;hash of workspace id&gt;</code>, labelled <code>app.kubernetes.io/managed-by=paseo-sandboxes</code>, with a shared process namespace and no service account token. The main container idles; work arrives through <code>kubectl exec</code>.</p>
-<h2 id="launcher">Launcher</h2><pre><code>kube-exec.sh --namespace NS --pod POD [--kubeconfig FILE] [--context C] [--container main]
-  [--cwd DIR] [--env NAME]... [--state-dir /tmp/sbx] -- command [args...]</code></pre>
-<p>Forwarded variable values travel as <code>kubectl exec</code> arguments. Use the environment Secret for credentials.</p>
-<h2 id="kubeconfig-file">Kubeconfig file</h2><p>Optional absolute path of a kubeconfig file on the daemon host (Cluster tab). The plugin passes <code>--kubeconfig</code> to every <code>kubectl</code> call and to the launcher, so wrapped commands use the same identity. Use a <strong>dedicated narrow identity</strong> limited to the sandbox namespace. The plugin stores only the path and never reads or logs the file. Exec credential plugins referenced by the file must exist on the daemon host. <strong>Check cluster</strong> reports the path and context used. See <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#kubeconfig-file">Kubeconfig file</a> in the setup guide. Not tested on a real cluster.</p>
-<h2 id="git-over-ssh">Git over SSH</h2><p>Optional. Set an absolute path to a <strong>dedicated</strong> private key and a known_hosts file on the daemon host (Cluster tab). The plugin manages one Secret, <code>paseo-sandbox-ssh</code>, mounted read-only (0400) at <code>/etc/sandbox-ssh</code> in the main container and the clone init container, never in sidecars, with strict host key checking. The key is readable by every process in the pod, by anyone who can read Secrets in the namespace, and by the daemon identity: use a deploy key limited to the repositories agents work on. Isolation is resource and process only. See <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#git-over-ssh">Git over SSH</a> in the setup guide; it has not been tested on a real cluster.</p>
-<h2 id="cluster-admin-tasks">Cluster admin tasks</h2>
-<p>The plugin runs as the cluster identity <code>kubectl</code> uses on the daemon host. Day to day it only creates and deletes pods in its sandbox namespace, runs <code>exec</code> and reads logs there, and (clone mode with a per-sandbox volume) creates and deletes its own claims. None of that is admin work. An admin does these once:</p>
-<ul><li>create the sandbox namespace;</li><li>apply the Role in <code>config/plugin-rbac.yaml</code> and bind it to the identity <code>kubectl</code> uses;</li><li>the cases below, when you use them.</li></ul>
-<h3 id="cluster-rights">Cluster rights (optional)</h3>
-<p>Needed only when the identity <code>kubectl</code> uses lacks pods, pods/exec, pods/log and persistent volume claim rights (and, with Git over SSH, the Secret rights on <code>paseo-sandbox-ssh</code>) in the namespace. They are not needed with cluster-admin, or when a GitOps repository already applies the Role. The plugin cannot grant itself rights; <strong>Check cluster</strong> only verifies them, read-only (<code>kubectl auth can-i</code>). A cluster admin runs:</p><pre><code>kubectl create namespace paseo-sandboxes
-kubectl apply -n paseo-sandboxes -f config/plugin-rbac.yaml
-kubectl create rolebinding paseo-sandboxes -n paseo-sandboxes \
-  --role=paseo-sandboxes --user=&lt;identity&gt;</code></pre>
-<h3 id="sharing-the-paseo-worktrees-volume">Sharing the Paseo worktrees volume</h3>
-<p>Shared worktree mode mounts the daemon's worktrees folder and the main repository's <code>.git</code> into each pod. A PersistentVolumeClaim cannot be mounted from another namespace, so the volume must be mountable from the sandbox namespace, and it must support several writers (ReadWriteMany) unless all pods land on one node. Options for an admin:</p>
-<ul><li><strong>Use the namespace that already holds the claim</strong> as the sandbox namespace (and bind the Role there).</li><li><strong>Give the sandbox namespace its own claim on the same underlying volume</strong>: a static PersistentVolume with reclaim policy <code>Retain</code> (so deleting one claim does not delete the data) plus a PersistentVolumeClaim in the sandbox namespace bound to it. This works only if your storage provider supports a volume being used this way.</li><li><strong>Use clone mode</strong>: no shared volume is needed, but Paseo's file tree, diffs and git status do not show what the agents did in the pod; results come back through git.</li></ul>
-<p>Whichever you choose, the mount paths, sub paths and file ownership (<code>fsGroup</code> / uid; see <em>Run as user ID</em>) in the plugin settings must match how the files sit on the volume and who owns them.</p>
-<h3 id="docker-in-a-sandbox-privileged-sidecar">Docker in a sandbox (privileged sidecar)</h3>
-<p>Docker is not built in: it is a <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#sidecars">sidecar</a> you define. A docker-in-docker sidecar typically needs <code>privileged: true</code>. A namespace whose Pod Security level is <code>baseline</code> or <code>restricted</code> rejects such pods, so an admin must provide a namespace that allows privileged pods (or an alternative runtime they trust). The workspace volumes are mounted into the sidecar at the same paths as in the main container, so bind-mount paths resolve.</p>
-<p><strong>Isolation.</strong> A privileged container is close to root on the node. The plugin gives resource and process isolation; it is not a security boundary, and a privileged sidecar weakens it further.</p>
-<p><strong>Not tested</strong> on a real cluster (see <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md#example-docker">the setup guide</a>): docker bind mounts of paths that come from <code>subPath</code> volume mounts; file ownership of files written by containers started through the sidecar; the <code>docker:dind</code> entrypoint in a shared process namespace; whether the 25-second launch timeout is too short for a cold image pull; eviction when the state volume or ephemeral storage limit is exceeded; whether a namespace that denies privileged pods gives a readable error; nested resource limits.</p>
-<h3 id="who-does-what">Who does what</h3>
-<table><thead><tr><th>Capability</th><th>Needs an admin?</th><th>Who does it</th></tr></thead><tbody>
-<tr><td>Pods, exec, logs in the sandbox namespace</td><td>Once</td><td>Admin creates the namespace and the Role binding; the plugin does the rest.</td></tr>
-<tr><td>Git SSH Secret (<code>paseo-sandbox-ssh</code>)</td><td>Once, with the Role</td><td>The plugin creates and manages it. The daemon identity needs the <code>secrets</code> rights of the Role: create, and get, update, patch, delete on that one name.</td></tr>
-<tr><td>Environment Secret, Git Secret</td><td>Depends on your RBAC</td><td>Whoever may create Secrets in the namespace; the plugin does not create these.</td></tr>
-<tr><td>Shared worktrees across namespaces</td><td>Yes</td><td>Admin: shared volume, PV and PVC, as above.</td></tr>
-<tr><td>Docker sidecar</td><td>Yes</td><td>Admin: a namespace allowing privileged pods.</td></tr>
-<tr><td><code>runtimeClassName</code>, tolerations</td><td>Depends on the cluster</td><td>Admin, if the runtime class or node taints are cluster-managed; the plugin only sets them on the pod.</td></tr>
-</tbody></table>
-<h2 id="rbac">RBAC</h2><p>pods: get, list, watch, create, delete; pods/exec: create; pods/log: get; persistentvolumeclaims: get, list, create, delete (clone mode volumes and the Cluster check); secrets: create, and get, update, patch, delete restricted to <code>paseo-sandbox-ssh</code> (Git over SSH only).</p>
-</main>
+    <h1>Reference</h1>
+    <h2 id="connection">Connection</h2>
+    <dl><dt>Controller URL</dt><dd>Private HTTPS origin reachable from the Paseo daemon. The route must support HTTP/2 streams.</dd>
+    <dt>Token file</dt><dd>Absolute daemon path to the raw controller token.</dd>
+    <dt>CA file</dt><dd>Absolute daemon path to the CA certificate for a private TLS endpoint. Leave empty to use system trust.</dd>
+    <dt>Sandbox profile</dt><dd>One administrator-defined profile permitted for the token.</dd></dl>
+    <h2 id="profiles">Helm profiles</h2>
+    <p>A profile specifies the image and a <code>worktree</code> volume mapping. Linked Git worktrees also need a <code>repository</code> mapping. Each mapping has a <code>claimName</code>, an absolute <code>basePath</code> on the daemon and an optional PVC <code>subPath</code>.</p>
+    <p>Administrators can also set <code>idleMinutes</code>, <code>container</code> options such as resources, <code>podSpec</code> options such as placement, and <code>sidecars</code>.</p>
+    <h2 id="tokens">Scoped tokens</h2>
+    <p>Each principal has a distinct <code>tokenSha256</code> and a list of allowed profiles. Sandbox identity also includes the principal and the workspace ID.</p>
+    <h2 id="workspace-status">Workspace status</h2>
+    <p>Opt in to send new launches to Kubernetes. <strong>Refresh status</strong> shows whether the pod is starting, running, stopping, failed or absent. <strong>Stop sandbox</strong> requests deletion while keeping the workspace opted in.</p>
+  </main>
 </div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>
 <script>

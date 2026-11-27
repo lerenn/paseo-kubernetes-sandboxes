@@ -1,5 +1,5 @@
-# EXAMPLE of a worktree volume claim. The daemon and the sandbox pods must reach the same files:
-# use a ReadWriteMany class (NFS, CephFS, ...) or keep everything on one node. Adjust to your cluster.
+# Example claim for worktree storage shared by the daemon and sandbox pods.
+# Select a ReadWriteMany storage class for your cluster.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

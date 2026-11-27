@@ -1,11 +1,14 @@
 {
   "name": "paseo-sandboxes",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/*.test.ts shared/*.test.ts client/*.test.ts launcher/*.test.ts"
+    "test": "node --import tsx --test server/*.test.ts",
+    "build:launcher": "node launcher/embed.mjs",
+    "pretypecheck": "npm run build:launcher",
+    "pretest": "npm run build:launcher"
   },
   "devDependencies": {
     "@getpaseo/client": "0.17.5",

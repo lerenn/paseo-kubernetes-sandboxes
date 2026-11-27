@@ -1,0 +1,25 @@
+profiles:
+  development:
+    image: ghcr.io/your-org/paseo-sandbox:latest
+    worktree:
+      claimName: paseo-worktrees
+      basePath: /srv/paseo/worktrees
+    repository:
+      claimName: paseo-repositories
+      basePath: /srv/paseo/repos
+    idleMinutes: 120
+    container:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+
+principals:
+  paseo-daemon:
+    # Replace with the hex SHA-256 digest of the token, excluding its trailing newline.
+    tokenSha256: "REPLACE_WITH_TOKEN_SHA256"
+    profiles:
+      - development

@@ -219,63 +219,6 @@ export function Choice({
     </Pressable>
   );
 }
-export function Disclosure({
-  theme,
-  title = "Advanced settings",
-  label,
-  summary,
-  children,
-}: {
-  theme: Theme;
-  title?: string;
-  label?: string;
-  summary?: string;
-  children: ReactNode;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View style={{ borderTopWidth: 1, borderColor: theme.colors.border }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label ?? title}
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded(!expanded)}
-        style={({ pressed }) => ({
-          paddingVertical: 14,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          opacity: pressed ? 0.7 : 1,
-        })}
-      >
-        <Icon
-          name={expanded ? "ChevronDown" : "ChevronRight"}
-          size={16}
-          color={theme.colors.foregroundMuted}
-        />
-        <View style={{ flex: 1, gap: 3 }}>
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: "500",
-              color: theme.colors.foreground,
-            }}
-          >
-            {title}
-          </Text>
-          {summary && !expanded && (
-            <Text style={{ fontSize: 14, color: theme.colors.foregroundMuted }}>
-              {summary}
-            </Text>
-          )}
-        </View>
-      </Pressable>
-      {expanded && (
-        <View style={{ gap: 16, paddingBottom: 6 }}>{children}</View>
-      )}
-    </View>
-  );
-}
 export function Badge({
   theme,
   label,
@@ -379,47 +322,5 @@ export function Card({
       </View>
       {children}
     </View>
-  );
-}
-
-// Edits a JSON value as text. The value is passed on only while the text parses and `check` accepts it.
-export function JsonField({
-  theme,
-  label,
-  value,
-  onChange,
-  check,
-  hint,
-  disabled = false,
-}: {
-  theme: Theme;
-  label: string;
-  value: unknown;
-  onChange(value: unknown): void;
-  check(value: unknown): string | null;
-  hint?: string;
-  disabled?: boolean;
-}) {
-  const [text, setText] = useState(() => JSON.stringify(value, null, 2));
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <Field
-      theme={theme}
-      label={label}
-      value={text}
-      disabled={disabled}
-      hint={error ?? hint}
-      onChange={(t) => {
-        setText(t);
-        try {
-          const v = JSON.parse(t);
-          const problem = check(v);
-          setError(problem);
-          if (!problem) onChange(v);
-        } catch {
-          setError("Not valid JSON yet; the change is not applied.");
-        }
-      }}
-    />
   );
 }

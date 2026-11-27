@@ -23,9 +23,9 @@ jobs:
             for (const f of [m.icon, "index.server.ts", "index.client.tsx"]) require("fs").accessSync(f);
             for (const cmd of m.build) require("child_process").execFileSync(cmd[0], cmd.slice(1), { stdio: "inherit" });
           '
-      - name: Launcher is executable and valid sh
+      - name: Launcher is executable and valid JavaScript
         working-directory: plugin
-        run: test -x launcher/kube-exec.sh && sh -n launcher/kube-exec.sh
+        run: test -x launcher/sandbox-exec.mjs && node --check launcher/sandbox-exec.mjs
   plugin-bundle:
     runs-on: ubuntu-latest
     steps:
@@ -34,7 +34,7 @@ jobs:
         with: {node-version: '22'}
       - name: Install the plugin's dependencies (as the manifest build step does)
         working-directory: plugin
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts && npm run build:launcher
       - name: Install Paseo's compiler, same version the plugin targets
         run: |
           v=$(node -p 'require("./plugin/package.json").devDependencies["@getpaseo/plugin"]')
@@ -43,14 +43,21 @@ jobs:
           echo "PASEO_VERSION=$v" >> "$GITHUB_ENV"
       - name: Build the plugin with the real Paseo compiler (client and server bundles)
         run: node .github/scripts/build-plugin.mjs "$RUNNER_TEMP/paseo/node_modules" plugin "$PASEO_VERSION"
+  # Keep this check name for the existing main-branch protection.
   rbac:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate the Kubernetes manifests
-        run: |
-          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
-          ./kubeconform -strict -summary config
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: controller/package-lock.json}
+      - run: npm ci --ignore-scripts && npm test && node --check server.mjs
+        working-directory: controller
+      - uses: azure/setup-helm@v4
+      - run: |
+          helm lint charts/paseo-sandbox-controller -f config/controller-values.example.yaml
+          helm template sandbox charts/paseo-sandbox-controller -f config/controller-values.example.yaml
+          helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
+      - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
   version:
     runs-on: ubuntu-latest
     steps:
