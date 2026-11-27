@@ -160,7 +160,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
           </View>
           <ExternalLink href={setupGuide}>Setup guide</ExternalLink>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View role="tablist" style={{ flexDirection: "row", gap: 4 }}>
             {TABS.map((t) => {
               const active = tab === t.id;
@@ -171,7 +171,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   aria-selected={active}
                   accessibilityLabel={t.label}
                   onPress={() => setTab(t.id)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: layout.compact ? 8 : 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: layout.compact ? 5 : 7, paddingHorizontal: layout.compact ? 4 : 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: active ? theme.colors.accent : "transparent" }}
                 >
                   <Icon name={t.icon} size={15} color={active ? theme.colors.accent : theme.colors.foregroundMuted} />
                   <Text style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 14, fontWeight: "600" }}>{t.label}</Text>
@@ -194,8 +194,8 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                 </View>
                 {config.connections.map((connection) => (
                   <View key={connection.id} role="row" style={[connectionTable.row, { borderTopWidth: 1, borderColor: theme.colors.border }]}>
-                    <Text role="cell" numberOfLines={2} style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
-                    <Text role="cell" numberOfLines={2} style={[text, connectionTable.id]}>{connection.id}</Text>
+                    <Text role="cell" style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
+                    <Text role="cell" style={[text, connectionTable.id]}>{connection.id}</Text>
                     <View role="cell" style={connectionTable.actions}>
                       <Button theme={theme} label="Edit" accessibilityLabel={`Edit ${connection.name}`} disabled={busy}
                         onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
@@ -398,8 +398,8 @@ const connectionTable = StyleSheet.create({
     paddingVertical: 4,
   },
   name: { flex: 3, minWidth: 0 },
-  id: { flex: 2, minWidth: 0 },
-  actions: { width: 76, alignItems: "flex-end" },
+  id: { flex: 2.5, minWidth: 0 },
+  actions: { width: 60, alignItems: "flex-end" },
   heading: { fontWeight: "600" },
   actionsHeading: { textAlign: "right" },
 });
