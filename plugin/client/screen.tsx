@@ -13,7 +13,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-const setupGuide = "https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md";
+const setupGuide = "https://kubernetes-sandboxes.paseo.lerenn.dev/getting-started.html";
 
 const connectionFields = [
   {
