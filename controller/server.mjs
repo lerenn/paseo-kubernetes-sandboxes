@@ -123,6 +123,9 @@ const server = createSecureServer({
         const body = await readBody(request);
         const profile = policy.profileFor(principal, body.profile);
         if (!profile) return send(response, 403, { error: "Profile is unavailable for this credential." });
+        if (body.privileged !== undefined && body.privileged !== Boolean(profile.docker?.enabled)) {
+          return send(response, 409, { error: "Sandbox profile privilege changed. Select the profile again in Paseo." });
+        }
         desired = buildPod(name, principal, body.profile, profile, body, owner);
       } catch {
         return send(response, 400, { error: "Invalid shared-worktree request. Check the profile's volume paths." });
@@ -139,8 +142,16 @@ const server = createSecureServer({
         if (request.httpVersionMajor !== 2) return send(response, 505, { error: "Command streaming requires HTTP/2." });
         const sandbox = status(pod);
         if (!sandbox?.ready || sandbox.deleting) return send(response, 409, { error: "Sandbox is not ready." });
+        const expectedProfile = request.headers["x-paseo-sandbox-profile"];
+        if (expectedProfile !== undefined && expectedProfile !== sandbox.profile) {
+          return send(response, 409, { error: "Sandbox profile changed. Reopen the session in Paseo." });
+        }
         const profile = policy.profileFor(principal, sandbox.profile);
         if (!profile) return send(response, 403, { error: "Profile access has been removed." });
+        const expectedPrivilege = request.headers["x-paseo-sandbox-privileged"];
+        if (expectedPrivilege !== undefined && expectedPrivilege !== String(Boolean(profile.docker?.enabled))) {
+          return send(response, 409, { error: "Sandbox profile privilege changed. Reopen the session in Paseo." });
+        }
         if (pod.metadata.annotations["paseo.dev/profile-revision"] !== profileRevision(profile)) {
           return send(response, 409, { error: "Profile settings changed. Stop the sandbox and launch again." });
         }

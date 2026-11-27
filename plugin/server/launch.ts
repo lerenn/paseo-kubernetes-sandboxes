@@ -8,7 +8,7 @@ export type Wrap = [string, ...string[]];
 export function buildWrap(
   c: Connection,
   workspaceId: string,
-  opts: { cwd: string; envNames: string[] },
+  opts: { cwd: string; envNames: string[]; profile: string; privileged?: boolean },
 ): Wrap {
   return [
     // Paseo evaluates the server bundle without a source directory. Keep the launcher in the wrap
@@ -26,6 +26,9 @@ export function buildWrap(
     ...(c.caFile ? ["--ca-file", c.caFile] : []),
     "--workspace",
     workspaceId,
+    "--profile",
+    opts.profile,
+    ...(opts.privileged === undefined ? [] : ["--privileged", String(opts.privileged)]),
     "--cwd",
     opts.cwd,
     ...opts.envNames.flatMap((n) => ["--env", n]),

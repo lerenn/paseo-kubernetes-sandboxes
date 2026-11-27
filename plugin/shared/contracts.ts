@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { connectionSchema } from "./settings.js";
+import { connectionSchema, settingsSchema } from "./settings.js";
 
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
@@ -32,6 +32,13 @@ export const workspacesList = defineRpc({
 // Stops and removes a workspace's sandbox (it is recreated at the next launch).
 export const sandboxStop = defineRpc({
   name: "sandbox.stop",
-  input: z.object({ workspaceId: z.string().min(1).max(200) }),
+  input: z.object({ workspaceId: z.string().min(1).max(200), revision: z.string() }),
+  output: z.object({}),
+});
+
+// Checks live routing before the client saves with the same settings revision.
+export const prepareSettingsSave = defineRpc({
+  name: "settings.prepare-save",
+  input: z.object({ revision: z.string(), values: settingsSchema }),
   output: z.object({}),
 });

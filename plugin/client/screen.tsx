@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ExternalLink, Icon, Loading, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
-import { controllerCheck, sandboxStop, workspacesList } from "../shared/contracts.js";
-import { isConfigured, sandboxSettings, settingsSchema, type Configuration } from "../shared/settings.js";
+import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
+import {
+  isConfigured, namedConnectionSchema, sandboxSettings, settingsSchema, standardConnectionId,
+  workspaceRoute, type Configuration, type NamedConnection,
+} from "../shared/settings.js";
 import { Badge, Button, Card, Choice, Field } from "./components.js";
 
 const TABS = [
-  { id: "connection", label: "Controller connection", icon: "Server" },
+  { id: "connection", label: "Controller connections", icon: "Server" },
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
 ] as const;
 
@@ -16,6 +19,7 @@ type TabId = (typeof TABS)[number]["id"];
 const setupGuide = "https://kubernetes-sandboxes.paseo.lerenn.dev/getting-started.html";
 
 const connectionFields = [
+  { key: "name", label: "Connection name", placeholder: "Standard", help: undefined },
   {
     key: "controllerUrl",
     label: "Controller URL",
@@ -45,39 +49,43 @@ const statusLabels = {
   unknown: "Unavailable",
 } as const;
 
+function blankConnection(id: string, name = ""): NamedConnection {
+  return { id, name, controllerUrl: "", tokenFile: "", caFile: "" };
+}
+
 export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   const settings = useSettings(sandboxSettings);
   const check = useRpc(controllerCheck);
   const list = useRpc(workspacesList);
   const stop = useRpc(sandboxStop);
+  const prepareSave = useRpc(prepareSettingsSave);
   const [tab, setTab] = useState<TabId>("connection");
-  const [draft, setDraft] = useState(() => settingsSchema.parse({}));
-  const [checks, setChecks] = useState<Awaited<ReturnType<typeof check>> | null>(null);
+  const [editor, setEditor] = useState<{ connection: NamedConnection; existing: boolean } | null>(null);
+  const [editorCheck, setEditorCheck] = useState<Awaited<ReturnType<typeof check>> | null>(null);
+  const [checks, setChecks] = useState<Record<string, Awaited<ReturnType<typeof check>>>>({});
   const [rows, setRows] = useState<Awaited<ReturnType<typeof list>>["workspaces"] | null>(null);
-  const [selection, setSelection] = useState<{ workspace: string; profile: string | undefined } | null>(null);
-  const [confirmation, setConfirmation] = useState<{ workspace: string; disable: boolean } | null>(null);
+  const [selection, setSelection] = useState<{ workspace: string; connectionId: string; profile?: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ id: string; revision: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const revision = settings.status === "ready" ? settings.revision : null;
 
   useEffect(() => {
     if (settings.status !== "ready") return;
-    setDraft(settings.values);
+    let current = true;
+    setChecks({});
+    setRows(null);
     setSelection(null);
     setConfirmation(null);
-    let current = true;
     void list({}).then(({ workspaces }) => {
       if (current) setRows(workspaces);
     }, () => {
       if (current) setError("The workspace list could not be read.");
     });
-    if (isConfigured(settings.values)) {
-      const { controllerUrl, tokenFile, caFile } = settings.values;
-      void check({ controllerUrl, tokenFile, caFile }).then((result) => {
-        if (current) setChecks(result);
-      }, () => {
-        if (current) setChecks(null);
-      });
+    for (const connection of settings.values.connections.filter(isConfigured)) {
+      void check(connection).then((result) => {
+        if (current) setChecks((previous) => ({ ...previous, [connection.id]: result }));
+      }, () => {});
     }
     return () => { current = false; };
   }, [revision]);
@@ -97,20 +105,21 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   async function save(values: Configuration) {
     if (settings.status !== "ready" && settings.status !== "invalid") return;
     const parsed = settingsSchema.parse(values);
+    await prepareSave({ revision: settings.revision, values: parsed });
     if (!(await settings.save(parsed, settings.revision))) throw new Error("Settings changed. Try again.");
-    setDraft(parsed);
   }
 
-  const removeWorkspace = (id: string) => save({ ...draft, workspaces: draft.workspaces.filter((w) => w.id !== id) });
-
   if (settings.status === "loading") return <Loading />;
-  const ready = settings.status === "ready";
-  const dirty = !ready || connectionFields.some(({ key }) => draft[key] !== settings.values[key]);
-  const validated = settingsSchema.safeParse(draft);
-  const profiles = checks?.profiles ?? [];
-  const standard = profiles.find(({ id, privileged }) => id === "standard" && !privileged);
+  const config = settings.status === "ready" ? settings.values : settingsSchema.parse({});
+  const validated = editor && namedConnectionSchema.safeParse(editor.connection);
+  const available = config.connections.filter(({ id }) => checks[id]?.profiles.length);
   const text = { color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 21 };
   const pad = layout.compact ? 16 : 28;
+
+  function choose(workspace: string, connectionId: string, profile?: string) {
+    const standard = checks[connectionId]?.profiles.find(({ id, privileged }) => id === "standard" && !privileged);
+    setSelection({ workspace, connectionId, profile: profile ?? standard?.id });
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
@@ -147,91 +156,130 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
-          {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connection" description="Use the private endpoint and credential files provided by your administrator.">
-            {connectionFields.map(({ key, label, placeholder, help }) => (
-              <Field key={key} theme={theme} label={label} placeholder={placeholder} value={draft[key]} disabled={busy}
-                help={(
-                  <View style={{ gap: 4 }}>
-                    <Text style={text}>{help}</Text>
-                    <ExternalLink href={setupGuide}>Setup guide for administrators</ExternalLink>
-                  </View>
-                )}
-                error={validated.error?.issues.find(({ path }) => path[0] === key)?.message}
-                onChange={(value) => { setDraft((d) => ({ ...d, [key]: value })); setChecks(null); setSelection(null); setConfirmation(null); }} />
-            ))}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              <Button theme={theme} label="Save connection" primary disabled={busy || !dirty || !validated.success}
-                onPress={() => void action(() => save(draft))} />
-              <Button theme={theme} label="Check connection" disabled={busy || !validated.success}
-                onPress={() => void action(async () => setChecks(await check({
-                  controllerUrl: draft.controllerUrl, tokenFile: draft.tokenFile, caFile: draft.caFile,
-                })))} />
-            </View>
-            {checks?.checks.map(({ id, label, status, detail }) => (
-              <View key={id} style={{ gap: 4 }}>
-                <Badge theme={theme} label={label + " · " + (status === "ok" ? "Verified" : status === "fail" ? "Failed" : "Skipped")}
-                  tone={status === "ok" ? "success" : status === "fail" ? "warning" : "muted"} />
-                <Text style={text}>{detail}</Text>
+          {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
+            {config.connections.map((connection) => (
+              <View key={connection.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <Text style={text}>{connection.name} ({connection.id})</Text>
+                <Button theme={theme} label={`Edit ${connection.name}`} disabled={busy}
+                  onPress={() => { setEditor({ connection, existing: true }); setEditorCheck(null); }} />
               </View>
             ))}
+            {!editor && (
+              <Button theme={theme} label="Add connection" disabled={busy || config.connections.length >= 20}
+                onPress={() => {
+                  const standard = !config.connections.some(({ id }) => id === standardConnectionId);
+                  setEditor({ connection: standard ? blankConnection(standardConnectionId, "Standard") : blankConnection(""), existing: false });
+                  setEditorCheck(null);
+                }} />
+            )}
+            {editor && (
+              <View style={{ gap: 12 }}>
+                <Field theme={theme} label="Connection ID" placeholder="docker-lab" value={editor.connection.id}
+                  disabled={busy || editor.existing}
+                  error={validated ? validated.error?.issues.find(({ path }) => path[0] === "id")?.message : undefined}
+                  onChange={(id) => { setEditor({ ...editor, connection: { ...editor.connection, id } }); setEditorCheck(null); }} />
+                {connectionFields.map(({ key, label, placeholder, help }) => (
+                  <Field key={key} theme={theme} label={label} placeholder={placeholder} value={editor.connection[key]} disabled={busy}
+                    help={help && (
+                      <View style={{ gap: 4 }}>
+                        <Text style={text}>{help}</Text>
+                        <ExternalLink href={setupGuide}>Setup guide for administrators</ExternalLink>
+                      </View>
+                    )}
+                    error={validated ? validated.error?.issues.find(({ path }) => path[0] === key)?.message : undefined}
+                    onChange={(value) => { setEditor({ ...editor, connection: { ...editor.connection, [key]: value } }); setEditorCheck(null); }} />
+                ))}
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  <Button theme={theme} label="Cancel" disabled={busy} onPress={() => setEditor(null)} />
+                  <Button theme={theme} label="Check connection" disabled={busy || !validated?.success}
+                    onPress={() => void action(async () => setEditorCheck(await check(editor.connection)))} />
+                  <Button theme={theme} label="Save connection" primary disabled={busy || !validated?.success}
+                    onPress={() => void action(async () => {
+                      if (!validated?.success) return;
+                      const connection = validated.data;
+                      if (!editor.existing && config.connections.some(({ id }) => id === connection.id)) {
+                        throw new Error("Choose a unique connection ID.");
+                      }
+                      await save({
+                        ...config,
+                        connections: editor.existing
+                          ? config.connections.map((old) => old.id === connection.id ? connection : old)
+                          : [...config.connections, connection],
+                      });
+                      setEditor(null);
+                    })} />
+                  {editor.existing && !config.workspaces.some(({ connectionId }) => connectionId === editor.connection.id) && (
+                    <Button theme={theme} label="Remove connection" disabled={busy} onPress={() => void action(async () => {
+                      await save({ ...config, connections: config.connections.filter(({ id }) => id !== editor.connection.id) });
+                      setEditor(null);
+                    })} />
+                  )}
+                </View>
+                {editorCheck?.checks.map(({ id, label, status, detail }) => (
+                  <View key={id} style={{ gap: 4 }}>
+                    <Badge theme={theme} label={label + " · " + (status === "ok" ? "Verified" : status === "fail" ? "Failed" : "Skipped")}
+                      tone={status === "ok" ? "success" : status === "fail" ? "warning" : "muted"} />
+                    <Text style={text}>{detail}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </Card>}
 
-          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a sandbox profile for each workspace you want to run in Kubernetes.">
-            <Button theme={theme} label="Refresh status" disabled={busy || !ready}
+          {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a controller connection and its sandbox profile for each workspace.">
+            <Button theme={theme} label="Refresh status" disabled={busy || settings.status !== "ready"}
               onPress={() => void action(async () => setRows((await list({})).workspaces))} />
             {rows?.length === 0 && <Text style={text}>No workspaces on this host.</Text>}
-            {!profiles.length && rows?.length ? <Text style={text}>Check and save the connection to load available profiles.</Text> : null}
+            {!available.length && rows?.length ? <Text style={text}>Save a connection that grants access to at least one profile.</Text> : null}
             {rows?.map((row) => {
-              const workspace = draft.workspaces.find(({ id }) => row.id === id);
-              const chosen = profiles.find(({ id }) => id === workspace?.profile);
+              const route = workspaceRoute(config, row.id);
+              const chosen = route && checks[route.connection.id]?.profiles.find(({ id, privileged }) =>
+                id === route.workspace.profile && (route.workspace.privileged === undefined || privileged === route.workspace.privileged));
               const choosing = selection?.workspace === row.id ? selection : null;
-              const confirming = confirmation?.workspace === row.id ? confirmation : null;
+              const confirming = confirmation?.id === row.id && confirmation.revision === revision;
               const hasSandbox = row.sandbox !== "absent";
-              const selected = profiles.find(({ id }) => id === choosing?.profile);
+              const choices = choosing ? checks[choosing.connectionId]?.profiles ?? [] : [];
+              const selected = choices.find(({ id }) => id === choosing?.profile);
               return (
                 <View key={row.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingVertical: 12, gap: 8 }}>
                   <Text style={{ color: theme.colors.foreground, fontWeight: "600", fontSize: 16 }}>{row.name}</Text>
                   <Text style={text}>{row.directory}</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                    <Badge theme={theme} label={workspace ? statusLabels[row.sandbox] : "Runs on daemon"}
+                    <Badge theme={theme} label={route ? statusLabels[row.sandbox] : "Runs on daemon"}
                       tone={row.sandbox === "running" ? "success" : "muted"} />
+                    {route && <Badge theme={theme} label={route.connection.name} />}
                     {chosen && <Badge theme={theme} label={chosen.label} tone={chosen.privileged ? "warning" : "muted"} />}
-                    {workspace && !chosen && <Text style={text}>{workspace.profile ? "Saved profile unavailable" : "Choose a profile"}</Text>}
+                    {route && !chosen && <Text style={text}>{route.workspace.profile ? `Saved profile: ${route.workspace.profile}` : "Choose a profile"}</Text>}
                   </View>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    {(!workspace || !hasSandbox) && !choosing && (
-                      <Button theme={theme} label={workspace?.profile ? "Change profile" : workspace ? "Choose profile" : "Enable sandbox"}
-                        disabled={busy || dirty || !profiles.length}
+                    {!hasSandbox && !choosing && (
+                      <Button theme={theme} label={route ? "Change connection or profile" : "Enable sandbox"}
+                        disabled={busy || !available.length}
                         onPress={() => {
                           setConfirmation(null);
-                          setSelection({ workspace: row.id, profile: chosen?.id ?? standard?.id });
+                          choose(row.id, route?.connection.id ?? standardConnectionId, chosen?.id);
                         }} />
                     )}
-                    {workspace && row.sandbox !== "absent" && row.sandbox !== "stopping" && !confirming && (
-                      <Button theme={theme} label="Stop sandbox" disabled={busy || dirty || !isConfigured(draft)}
-                        onPress={() => { setSelection(null); setConfirmation({ workspace: row.id, disable: false }); }} />
+                    {route && hasSandbox && row.sandbox !== "stopping" && !confirming && (
+                      <Button theme={theme} label="Stop sandbox" disabled={busy || !isConfigured(route.connection)}
+                        onPress={() => { setSelection(null); if (revision) setConfirmation({ id: row.id, revision }); }} />
                     )}
-                    {workspace && !confirming && (
-                      <Button theme={theme} label="Disable sandbox" disabled={busy || dirty}
-                        onPress={() => {
-                          setSelection(null);
-                          if (hasSandbox && isConfigured(draft)) setConfirmation({ workspace: row.id, disable: true });
-                          else void action(() => removeWorkspace(row.id));
-                        }} />
+                    {route && !hasSandbox && !choosing && (
+                      <Button theme={theme} label="Disable sandbox" disabled={busy}
+                        onPress={() => void action(() => save({ ...config, workspaces: config.workspaces.filter(({ id }) => id !== row.id) }))} />
                     )}
                   </View>
-                  {workspace && hasSandbox && !confirming && (
-                    <Text style={text}>Stop the sandbox and refresh its status before changing profiles.</Text>
+                  {route && hasSandbox && !confirming && (
+                    <Text style={text}>Stop the sandbox and wait for No sandbox before changing its connection or profile.</Text>
                   )}
                   {confirming && (
                     <View style={{ gap: 8 }}>
                       <Text style={text}>Stopping deletes this sandbox. Running processes and ephemeral state are lost. Shared worktree files are kept.</Text>
                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                         <Button theme={theme} label="Cancel" disabled={busy} onPress={() => setConfirmation(null)} />
-                        <Button theme={theme} label={confirming.disable ? "Stop and disable" : "Stop and delete sandbox"} danger disabled={busy || dirty}
+                        <Button theme={theme} label="Stop and delete sandbox" danger disabled={busy}
                           onPress={() => void action(async () => {
-                            await stop({ workspaceId: row.id });
-                            if (confirming.disable) await removeWorkspace(row.id);
+                            await stop({ workspaceId: row.id, revision: confirmation.revision });
                             setRows((await list({})).workspaces);
                             setConfirmation(null);
                           })} />
@@ -239,20 +287,29 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     </View>
                   )}
                   {choosing && (
-                    <View style={{ gap: 8 }} accessibilityRole="radiogroup">
-                      {profiles.map((profile) => (
-                        <Choice key={profile.id} theme={theme} role="radio" label={profile.label} checked={profile.id === choosing.profile}
-                          description={profile.privileged ? "For trusted workspaces only." : undefined} disabled={busy || dirty}
-                          onChange={() => setSelection({ ...choosing, profile: profile.id })} />
-                      ))}
+                    <View style={{ gap: 8 }}>
+                      <View accessibilityRole="radiogroup">
+                        {available.map(({ id, name }) => (
+                          <Choice key={id} theme={theme} role="radio" label={`${name} (${id})`} checked={id === choosing.connectionId}
+                            disabled={busy} onChange={() => choose(row.id, id)} />
+                        ))}
+                      </View>
+                      <View accessibilityRole="radiogroup">
+                        {choices.map((profile) => (
+                          <Choice key={profile.id} theme={theme} role="radio" label={profile.label} checked={profile.id === choosing.profile}
+                            description={profile.privileged ? "For trusted workspaces only." : undefined} disabled={busy}
+                            onChange={() => setSelection({ ...choosing, profile: profile.id })} />
+                        ))}
+                      </View>
                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                         <Button theme={theme} label="Cancel" disabled={busy} onPress={() => setSelection(null)} />
-                        <Button theme={theme} label={workspace ? "Save profile" : "Enable with profile"} primary
-                          disabled={busy || dirty || !selected || (Boolean(workspace) && hasSandbox)}
+                        <Button theme={theme} label={route ? "Save workspace route" : "Enable with profile"} primary
+                          disabled={busy || !selected || hasSandbox}
                           onPress={() => void action(async () => {
                             if (!selected) return;
-                            await save({ ...draft, workspaces: [
-                              ...draft.workspaces.filter((w) => w.id !== row.id), { id: row.id, profile: selected.id },
+                            await save({ ...config, workspaces: [
+                              ...config.workspaces.filter((w) => w.id !== row.id),
+                              { id: row.id, connectionId: choosing.connectionId, profile: selected.id, privileged: selected.privileged },
                             ] });
                             setSelection(null);
                           })} />

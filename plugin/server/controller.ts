@@ -13,7 +13,14 @@ export class ControllerError extends Error {
   }
 }
 
-export type SandboxStatus = { profile: string; phase: string; ready: boolean; deleting: boolean } | null;
+const sandboxStatus = z.object({
+  profile: z.string(),
+  phase: z.string(),
+  ready: z.boolean(),
+  deleting: z.boolean(),
+}).nullable();
+const statusResponse = z.object({ sandbox: sandboxStatus });
+export type SandboxStatus = z.infer<typeof sandboxStatus>;
 
 // One JSON request to the controller. The token is read per call (a rotated file is picked up) and never logged.
 export function call<T>(c: Connection, method: string, path: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
@@ -70,21 +77,21 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
 const sandboxPath = (workspaceId: string) => `/v1/sandboxes/${encodeURIComponent(workspaceId)}`;
 
 export const health = (c: Connection) => call<{ ok: boolean }>(c, "GET", "/healthz");
-export const profiles = async (c: Connection) =>
-  z.object({ profiles: z.array(sandboxProfile) }).parse(await call(c, "GET", "/v1/profiles")).profiles;
+export const profiles = async (c: Connection, timeoutMs?: number) =>
+  z.object({ profiles: z.array(sandboxProfile) }).parse(await call(c, "GET", "/v1/profiles", undefined, timeoutMs)).profiles;
 export const getSandbox = async (c: Connection, workspaceId: string) =>
-  (await call<{ sandbox: SandboxStatus }>(c, "GET", sandboxPath(workspaceId))).sandbox;
+  statusResponse.parse(await call(c, "GET", sandboxPath(workspaceId))).sandbox;
 export const stopSandbox = (c: Connection, workspaceId: string) => call(c, "DELETE", sandboxPath(workspaceId));
 
 // Creates the sandbox if needed and waits until it is ready (the controller answers immediately).
 export async function ensureSandbox(
-  c: Connection & { profile: string },
+  c: Connection & { profile: string; privileged?: boolean },
   workspaceId: string,
   paths: { root: string; gitDir: string | null },
   { timeoutMs = 25_000, intervalMs = 1000 }: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const body = { profile: c.profile, root: paths.root, ...(paths.gitDir ? { gitDir: paths.gitDir } : {}) };
+  const body = { profile: c.profile, privileged: c.privileged, root: paths.root, ...(paths.gitDir ? { gitDir: paths.gitDir } : {}) };
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error("The sandbox is still starting. Try again in a moment.");
