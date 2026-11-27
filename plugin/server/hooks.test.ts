@@ -110,3 +110,30 @@ test("launches reject a privilege change under a saved profile ID", async () => 
     ensure: async () => assert.fail("a changed privilege level must prevent provisioning"),
   }, launch), /privilege level changed/);
 });
+
+test("requiring profiles blocks unassigned launches while allowing recovery and maintenance", async () => {
+  assert.equal(config.requireSandboxProfile, false);
+  const required = { ...deps, configuration: async () => ({ ...config, requireSandboxProfile: true }) };
+  const unassigned = { ...launch, workspaceId: "other" };
+  await assert.rejects(wrapFor(required, unassigned), /Select an authorized profile/);
+  await assert.rejects(wrapFor(required, { ...unassigned, wrap: ["/other"] }), /Select an authorized profile/);
+  await assert.rejects(wrapFor(required, { ...launch, wrap: ["/other"] }), /conflicting wrapper/);
+  assert.equal(await wrapFor(required, { ...unassigned, allowUnassigned: true }), undefined);
+  assert.equal(await wrapFor(required, { ...unassigned, reuseOnly: true }), undefined);
+  assert.equal(await wrapFor(required, { ...unassigned, workspaceId: null }), undefined);
+});
+
+test("required profiles recheck authorization and pin privilege even for legacy routes", async () => {
+  const required = {
+    ...deps,
+    configuration: async () => ({ ...config, requireSandboxProfile: true }),
+    profiles: async () => [{ id: "standard", label: "Standard", privileged: false }],
+    ensure: async (settings: { privileged?: boolean }) => assert.equal(settings.privileged, false),
+  };
+  assert.ok(await wrapFor(required, launch));
+  await assert.rejects(wrapFor({ ...required, profiles: async () => [] }, launch), /Select an authorized profile/);
+  await assert.rejects(wrapFor({
+    ...required,
+    profiles: async () => [{ id: "docker", label: "Docker", privileged: true }],
+  }, { ...launch, workspaceId: "w2" }), /Select an authorized profile/);
+});

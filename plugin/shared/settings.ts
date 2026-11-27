@@ -35,7 +35,11 @@ export const namedConnectionSchema = connectionSchema.safeExtend({
   id: profileId,
   name: z.string().trim().min(1).max(80),
 });
+export const profileRequiredMessage =
+  "Select an authorized profile in Kubernetes Sandbox → Workspaces, then retry the launch.";
+
 export const settingsSchema = z.object({
+  requireSandboxProfile: z.boolean().default(false),
   connections: z.array(namedConnectionSchema).max(20).default([]),
   workspaces: z.array(z.object({
     id: z.string().min(1).max(200),

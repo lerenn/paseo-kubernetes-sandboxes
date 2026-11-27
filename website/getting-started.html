@@ -27,6 +27,7 @@
       <li>In <strong>Kubernetes Sandbox</strong>, select <strong>Add connection</strong>. Use <code>standard</code> as the ID for the default connection. Enter the controller URL and absolute file paths as seen by the daemon, including inside its container if applicable. Select <strong>Save connection</strong>, then <strong>Check connection</strong>.</li>
       <li>Under <strong>Workspaces</strong>, select <strong>Enable sandbox</strong>, choose a connection and one of its authorized profiles, then confirm with <strong>Enable with profile</strong>.</li>
     </ol>
+    <p>To require a profile on this daemon, turn on <strong>Require a sandbox profile</strong> in <strong>Controllers</strong>. It starts off. Create a blank workspace, then choose a profile under <strong>Workspaces</strong> before starting an agent, terminal or setup command. The policy applies to new launches through Paseo’s workspace hooks. Active sessions and daemon maintenance continue.</p>
     <p>For a lab Docker workspace, ask your administrator for a dedicated Docker controller connection, then add its HTTPS origin, token file and CA file under <strong>Controller connections</strong>. In <strong>Workspaces</strong>, select that connection and explicitly choose <strong>Docker (privileged)</strong>. The Standard connection remains the default for new opt-ins.</p>
   </section>
 </article>
