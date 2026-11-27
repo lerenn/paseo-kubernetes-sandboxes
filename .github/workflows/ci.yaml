@@ -65,19 +65,19 @@ jobs:
             scripts/helm-installation "$values" "$role" template "$role" "$chart" \
               --namespace "$role" > "$RUNNER_TEMP/$role-render.yaml"
           done
-          rg -q 'kind: ClusterIssuer' "$RUNNER_TEMP/gateway-render.yaml"
-          rg -q 'REPLACE_WITH_GATEWAY_TOKEN_SHA256' "$RUNNER_TEMP/gateway-render.yaml"
-          rg -q 'ghcr.io/your-org/paseo-sandbox:stable' "$RUNNER_TEMP/standard-render.yaml"
-          rg -q 'ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable' "$RUNNER_TEMP/docker-render.yaml"
+          grep -Eq 'kind: ClusterIssuer' "$RUNNER_TEMP/gateway-render.yaml"
+          grep -Eq 'REPLACE_WITH_GATEWAY_TOKEN_SHA256' "$RUNNER_TEMP/gateway-render.yaml"
+          grep -Eq 'ghcr.io/your-org/paseo-sandbox:stable' "$RUNNER_TEMP/standard-render.yaml"
+          grep -Eq 'ghcr.io/your-org/paseo-sandbox-with-docker-cli:stable' "$RUNNER_TEMP/docker-render.yaml"
           for role in standard docker; do
             scripts/helm-installation "$values" "$role" > "$RUNNER_TEMP/$role-values.yaml"
-            if rg -q 'REPLACE_WITH_GATEWAY_TOKEN_SHA256|sandbox-gateway-tls|^kind: ClusterIssuer' \
+            if grep -Eq 'REPLACE_WITH_GATEWAY_TOKEN_SHA256|sandbox-gateway-tls|^kind: ClusterIssuer' \
               "$RUNNER_TEMP/$role-values.yaml" "$RUNNER_TEMP/$role-render.yaml"; then
               exit 1
             fi
           done
-          if rg -q 'paseo-sandbox-with-docker-cli' "$RUNNER_TEMP/standard-values.yaml" "$RUNNER_TEMP/standard-render.yaml" ||
-             rg -q 'paseo-sandbox:stable' "$RUNNER_TEMP/docker-values.yaml" "$RUNNER_TEMP/docker-render.yaml"; then
+          if grep -Eq 'paseo-sandbox-with-docker-cli' "$RUNNER_TEMP/standard-values.yaml" "$RUNNER_TEMP/standard-render.yaml" ||
+             grep -Eq 'paseo-sandbox:stable' "$RUNNER_TEMP/docker-values.yaml" "$RUNNER_TEMP/docker-render.yaml"; then
             exit 1
           fi
           yq eval '.controller as $controller | .profiles = $controller.profiles |
@@ -85,13 +85,13 @@ jobs:
             .tlsSecretName = "legacy-serving" | .resources.requests.cpu = "123m"' \
             "$RUNNER_TEMP/standard-values.yaml" > "$RUNNER_TEMP/legacy-values.yaml"
           helm template standard "$chart" -f "$RUNNER_TEMP/legacy-values.yaml" > "$RUNNER_TEMP/legacy-render.yaml"
-          rg -q 'secretName: "legacy-serving"' "$RUNNER_TEMP/legacy-render.yaml"
-          rg -q 'cpu: 123m' "$RUNNER_TEMP/legacy-render.yaml"
+          grep -Eq 'secretName: "legacy-serving"' "$RUNNER_TEMP/legacy-render.yaml"
+          grep -Eq 'cpu: 123m' "$RUNNER_TEMP/legacy-render.yaml"
           helm template standard "$chart" -f "$RUNNER_TEMP/legacy-values.yaml" \
             --set controller.tlsSecretName=override-serving --set controller.resources.requests.cpu=234m > "$RUNNER_TEMP/override-render.yaml"
-          rg -q 'secretName: "override-serving"' "$RUNNER_TEMP/override-render.yaml"
-          rg -q 'cpu: 234m' "$RUNNER_TEMP/override-render.yaml"
-          if rg -q 'secretName: "legacy-serving"|cpu: 123m' "$RUNNER_TEMP/override-render.yaml"; then
+          grep -Eq 'secretName: "override-serving"' "$RUNNER_TEMP/override-render.yaml"
+          grep -Eq 'cpu: 234m' "$RUNNER_TEMP/override-render.yaml"
+          if grep -Eq 'secretName: "legacy-serving"|cpu: 123m' "$RUNNER_TEMP/override-render.yaml"; then
             exit 1
           fi
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
