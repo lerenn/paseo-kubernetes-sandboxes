@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ExternalLink, Icon, Loading, ScrollView, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
-import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList } from "../shared/contracts.js";
+import { controllerCheck, prepareSettingsSave, sandboxStop, workspacesList, type SandboxProfile } from "../shared/contracts.js";
 import {
   isConfigured, namedConnectionSchema, sandboxSettings, settingsSchema, standardConnectionId,
   workspaceRoute, type Configuration, type NamedConnection,
@@ -65,6 +65,53 @@ function profileAvailability(connection: NamedConnection, result: ControllerChec
   if (auth?.status === "fail") return auth.detail;
   if (auth?.status !== "ok") return "Check the endpoint and credential files in Controllers.";
   return result.profiles.length === 0 ? "No profiles authorized for this token." : null;
+}
+
+const resourceLabels = [
+  ["cpu", "CPU"],
+  ["memory", "RAM"],
+  ["ephemeral-storage", "Ephemeral storage"],
+] as const;
+
+function ProfileResources({ resources, theme, compact }: {
+  resources: SandboxProfile["resources"];
+  theme: PluginScreenProps["theme"];
+  compact: boolean;
+}) {
+  const text = { color: theme.colors.foregroundMuted, fontSize: 13 };
+  const heading = [text, table.heading];
+  return (
+    <View role="cell" style={[profileTable.resources, compact && profileTable.compactResources]}>
+      {compact && <Text style={heading}>Container resources</Text>}
+      {resources === undefined ? <Text style={text}>Unavailable from controller</Text> : (
+        <>
+          <View style={profileTable.resourceLine}>
+            <View style={profileTable.resourceName} />
+            <Text style={[heading, profileTable.quantity]}>Request</Text>
+            <Text style={[heading, profileTable.quantity]}>Limit</Text>
+          </View>
+          {resources.map(({ kind, name, requests, limits }) => (
+            <View key={JSON.stringify([kind, name])} style={{ gap: 2 }}>
+              <Text style={[heading, { color: theme.colors.foreground }]}>
+                {kind === "main" ? "Main container" : kind === "init" ? `Init container (${name})` : `Sidecar (${name})`}
+              </Text>
+              {resourceLabels.map(([key, label]) => (
+                <View key={key} style={profileTable.resourceLine}>
+                  <Text style={[text, profileTable.resourceName]}>{label}</Text>
+                  <Text accessibilityLabel={`${label} request: ${requests[key] ?? "Unset"}`} style={[text, profileTable.quantity]}>
+                    {requests[key] ?? "Unset"}
+                  </Text>
+                  <Text accessibilityLabel={`${label} limit: ${limits[key] ?? "Unset"}`} style={[text, profileTable.quantity]}>
+                    {limits[key] ?? "Unset"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </>
+      )}
+    </View>
+  );
 }
 
 function blankConnection(id: string, name = ""): NamedConnection {
@@ -286,7 +333,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
             )}
           </Card>}
 
-          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each controller’s saved token.">
+          {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each controller’s saved token. Resource values come from the profile configuration. Persistent workspace storage uses shared volumes.">
             {config.connections.length === 0 && <Text style={text}>No controllers configured. Add a connection in Controllers.</Text>}
             {profileRows.length > 0 && (
               <View role="table" accessibilityLabel="Available profiles" style={tableFrame}>
@@ -295,9 +342,10 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                   <Text role="columnheader" style={[text, table.heading, profileTable.id]}>ID</Text>
                   <Text role="columnheader" style={[text, table.heading, profileTable.controller]}>Controller</Text>
                   <Text role="columnheader" style={[text, table.heading, profileTable.privilege]}>Privilege</Text>
+                  {!layout.compact && <Text role="columnheader" style={[text, table.heading, profileTable.resources]}>Container resources</Text>}
                 </View>
                 {profileRows.map(({ connection, profile }) => (
-                  <View key={JSON.stringify([connection.id, profile.id])} role="row" style={[tableRow, profileRow]}>
+                  <View key={JSON.stringify([connection.id, profile.id])} role="row" style={[tableRow, profileRow, profileTable.bodyRow, layout.compact && profileTable.compactRow]}>
                     <Text role="cell" style={[text, profileTable.profile, { color: theme.colors.foreground }]}>{profile.label}</Text>
                     <Text role="cell" style={[text, profileTable.id]}>{profile.id}</Text>
                     <View role="cell" style={[profileTable.controller, profileTable.controllerCell]}>
@@ -310,6 +358,7 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
                     <View role="cell" style={profileTable.privilege}>
                       {profile.privileged && <Badge theme={theme} label="Privileged" tone="warning" />}
                     </View>
+                    <ProfileResources resources={profile.resources} theme={theme} compact={layout.compact} />
                   </View>
                 ))}
               </View>
@@ -455,4 +504,11 @@ const profileTable = StyleSheet.create({
   controllerCell: { flexDirection: "row", alignItems: "center", gap: 4 },
   controllerLabel: { flex: 1, minWidth: 0 },
   privilege: { width: 80 },
+  bodyRow: { alignItems: "flex-start", paddingVertical: 8 },
+  compactRow: { flexWrap: "wrap" },
+  resources: { flex: 6, minWidth: 0, gap: 6 },
+  compactResources: { flexBasis: "100%", flexGrow: 0, paddingTop: 4 },
+  resourceLine: { flexDirection: "row", gap: 4 },
+  resourceName: { flex: 2, minWidth: 0 },
+  quantity: { flex: 1, minWidth: 0 },
 });

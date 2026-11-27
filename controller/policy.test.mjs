@@ -4,6 +4,7 @@ import test from "node:test";
 import { createPolicy, sandboxName, volumeSubPath } from "./policy.mjs";
 
 const profile = { image: "sandbox:test", worktree: { claimName: "shared", basePath: "/worktrees", subPath: "paseo" } };
+const unsetResources = (kind, name) => ({ kind, name, requests: {}, limits: {} });
 const token = "a".repeat(43);
 const hash = createHash("sha256").update(token).digest("hex");
 const config = {
@@ -17,7 +18,7 @@ test("controller tokens scope profile access and workspace identity", () => {
   assert.equal(principal, "daemon");
   assert.equal(policy.authenticate("Bearer " + "b".repeat(43)), null);
   assert.equal(policy.authenticate(undefined), null);
-  assert.deepEqual(policy.profilesFor(principal), [{ id: "default", label: "default", privileged: false }]);
+  assert.deepEqual(policy.profilesFor(principal), [{ id: "default", label: "default", privileged: false, resources: [unsetResources("main", "main")] }]);
   assert.equal(policy.profileFor(principal, "restricted"), undefined);
   assert.notEqual(sandboxName(principal, "workspace"), sandboxName("another-daemon", "workspace"));
 });
@@ -35,7 +36,13 @@ test("shared workspace mounts stay below the configured base", () => {
 
 test("Docker visibility requires an explicit enabled profile and principal allowlist", () => {
   const standard = profile;
-  const docker = { ...profile, docker: { enabled: true, image: "docker:dind" } };
+  const docker = {
+    ...profile,
+    container: { resources: { requests: { cpu: 1, memory: "256Mi" }, limits: { memory: "1Gi" } } },
+    sidecars: [{ name: "cache", resources: { limits: { "ephemeral-storage": "3Gi" } } }],
+    docker: { enabled: true, image: "docker:dind", sizeLimit: "20Gi", resources: { requests: { cpu: "250m" } } },
+    podSpec: { initContainers: [{ name: "prepare" }] },
+  };
   const scoped = createPolicy({
     profiles: { standard, docker },
     principals: {
@@ -43,8 +50,13 @@ test("Docker visibility requires an explicit enabled profile and principal allow
       trusted: { tokenSha256: "b".repeat(64), profiles: ["docker"] },
     },
   });
-  assert.deepEqual(scoped.profilesFor("normal"), [{ id: "standard", label: "Standard", privileged: false }]);
-  assert.deepEqual(scoped.profilesFor("trusted"), [{ id: "docker", label: "Docker (privileged)", privileged: true }]);
+  assert.deepEqual(scoped.profilesFor("normal"), [{ id: "standard", label: "Standard", privileged: false, resources: [unsetResources("main", "main")] }]);
+  assert.deepEqual(scoped.profilesFor("trusted"), [{ id: "docker", label: "Docker (privileged)", privileged: true, resources: [
+    { ...unsetResources("main", "main"), requests: { cpu: "1", memory: "256Mi" }, limits: { memory: "1Gi" } },
+    { ...unsetResources("sidecar", "cache"), limits: { "ephemeral-storage": "3Gi" } },
+    { ...unsetResources("sidecar", "docker"), requests: { cpu: "250m" } },
+    unsetResources("init", "prepare"),
+  ] }]);
   assert.equal(scoped.profileFor("normal", "docker"), undefined);
   assert.throws(() => createPolicy({ profiles: { standard: docker } }), /separate profile/);
   assert.throws(() => createPolicy({ profiles: { docker: profile } }), /Enable the Docker sidecar/);

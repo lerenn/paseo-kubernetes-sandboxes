@@ -1,3 +1,4 @@
+import { sandboxProfile } from "../shared/contracts.js";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,4 +33,15 @@ test("checks credential files independently before making controller requests", 
   assert.deepEqual(await statuses(), { url: "ok", token: "ok", ca: "ok", reach: "ok", auth: "ok" });
   assert.deepEqual(await statuses(""), { url: "ok", token: "ok", reach: "ok", auth: "ok" });
   assert.deepEqual(calls, ["health", "profiles", "health", "profiles"]);
+});
+
+
+test("profile discovery keeps resource metadata optional and preserves configured quantities", () => {
+  const profile = { id: "standard", label: "Standard", privileged: false };
+  assert.deepEqual(sandboxProfile.parse(profile), profile);
+  const withResources = {
+    ...profile,
+    resources: [{ kind: "main", name: "main", requests: { cpu: "250m", "ephemeral-storage": "1Gi" }, limits: {} }],
+  };
+  assert.deepEqual(sandboxProfile.parse(withResources), withResources);
 });

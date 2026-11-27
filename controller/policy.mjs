@@ -62,10 +62,30 @@ function validateProfile(name, profile) {
   if (profile.repository) validateVolume(profile.repository);
 }
 
+function containerResources(kind, name, resources) {
+  const quantities = (values) => Object.fromEntries(
+    ["cpu", "memory", "ephemeral-storage"].flatMap((key) => {
+      const value = values?.[key];
+      return typeof value === "string" || typeof value === "number" ? [[key, String(value)]] : [];
+    }),
+  );
+  return { kind, name, requests: quantities(resources?.requests), limits: quantities(resources?.limits) };
+}
+
 function profileInfo(id, profile) {
   const privileged = Boolean(profile.docker?.enabled);
   const label = profile.label?.trim() ?? (id === "standard" ? "Standard" : privileged ? "Docker" : id);
-  return { id, label: privileged ? `${label} (privileged)` : label, privileged };
+  return {
+    id,
+    label: privileged ? `${label} (privileged)` : label,
+    privileged,
+    resources: [
+      containerResources("main", "main", profile.container?.resources),
+      ...(profile.sidecars ?? []).map(({ name, resources }) => containerResources("sidecar", name, resources)),
+      ...(privileged ? [containerResources("sidecar", "docker", profile.docker.resources)] : []),
+      ...(profile.podSpec?.initContainers ?? []).map(({ name, resources }) => containerResources("init", name, resources)),
+    ],
+  };
 }
 
 export function profileRevision(profile) {
