@@ -1,4 +1,4 @@
-import { isConfigured, optedIn, type Configuration } from "../shared/settings.js";
+import { isConfigured, type Configuration } from "../shared/settings.js";
 import { ensureSandbox, getSandbox } from "./controller.js";
 import { resolveRepo, type RepoInfo } from "./repo.js";
 import { buildWrap, forwardableEnv, type Wrap } from "./launch.js";
@@ -25,10 +25,12 @@ export type LaunchInput = {
 export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap | undefined> {
   if (!input.workspaceId) return undefined;
   const c = await deps.configuration();
-  if (!optedIn(c, input.workspaceId)) return undefined;
+  const workspace = c.workspaces.find(({ id }) => id === input.workspaceId);
+  if (!workspace) return undefined;
   // A wrap from another plugin wins: Paseo rejects two different wraps.
   if (input.wrap) return undefined;
-  if (!isConfigured(c)) throw new Error("Kubernetes Sandbox is not configured: set the controller URL, token file and profile.");
+  if (!isConfigured(c)) throw new Error("Set the controller URL and token file in Kubernetes Sandbox.");
+  if (!workspace.profile) throw new Error("Choose a profile for this workspace in Kubernetes Sandbox.");
   let repo: RepoInfo;
   try {
     repo = await (deps.repo ?? resolveRepo)(input.cwd);
@@ -38,9 +40,9 @@ export async function wrapFor(deps: HookDeps, input: LaunchInput): Promise<Wrap 
   try {
     if (input.reuseOnly) {
       const sandbox = await (deps.status ?? getSandbox)(c, input.workspaceId);
-      if (!sandbox?.ready || sandbox.deleting) return undefined;
+      if (!sandbox?.ready || sandbox.deleting || sandbox.profile !== workspace.profile) return undefined;
     } else {
-      await (deps.ensure ?? ensureSandbox)(c, input.workspaceId, { root: repo.root, gitDir: repo.gitDir }, { timeoutMs: deps.startTimeoutMs ?? 25_000 });
+      await (deps.ensure ?? ensureSandbox)({ ...c, profile: workspace.profile }, input.workspaceId, { root: repo.root, gitDir: repo.gitDir }, { timeoutMs: deps.startTimeoutMs ?? 25_000 });
     }
   } catch (e) {
     // Fail the launch: running unwrapped would silently leave the sandbox.

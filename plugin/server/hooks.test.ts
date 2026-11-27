@@ -7,8 +7,7 @@ const config = settingsSchema.parse({
   controllerUrl: "https://controller.example.internal",
   tokenFile: "/var/lib/paseo/sandbox.token",
   caFile: "/var/lib/paseo/sandbox.crt",
-  profile: "dev",
-  workspaces: [{ id: "w1" }],
+  workspaces: [{ id: "w1", profile: "standard" }, { id: "w2", profile: "docker" }],
 });
 
 const deps: HookDeps = {
@@ -28,7 +27,7 @@ test("the wrap uses shared paths and forwards only environment names", async () 
   const wrap = await wrapFor({
     ...deps,
     ensure: async (settings, workspace, paths) => {
-      assert.equal(settings.profile, "dev");
+      assert.equal(settings.profile, "standard");
       assert.equal(workspace, "w1");
       assert.deepEqual(paths, { root: "/wt/a", gitDir: "/repos/a/.git" });
     },
@@ -51,6 +50,13 @@ test("teardown reuses a ready sandbox without creating one", async () => {
   const reuse = { ...deps, ensure: async () => assert.fail("teardown tried to create a sandbox") };
   assert.equal(await wrapFor({ ...reuse, status: async () => null }, teardown), undefined);
   assert.ok(await wrapFor({
-    ...reuse, status: async () => ({ ready: true, deleting: false, phase: "Running", profile: "dev" }),
+    ...reuse, status: async () => ({ ready: true, deleting: false, phase: "Running", profile: "standard" }),
   }, teardown));
+});
+
+test("each workspace launches with its saved profile and legacy opt-ins must choose one", async () => {
+  await wrapFor({ ...deps, ensure: async (settings) => assert.equal(settings.profile, "docker") }, { ...launch, workspaceId: "w2" });
+  await assert.rejects(wrapFor({
+    ...deps, configuration: async () => ({ ...config, workspaces: [{ id: "w1" }] }),
+  }, launch), /Choose a profile/);
 });

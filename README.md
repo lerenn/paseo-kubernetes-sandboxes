@@ -7,11 +7,11 @@ An administrator installs the controller with Helm, defines sandbox profiles and
 ## Install and use
 
 - Administrators need Kubernetes 1.34 or later, Helm 3 or later, shared persistent storage and an endpoint reachable from the Paseo daemon. The endpoint must carry HTTP/2.
-- Paseo users need Paseo 0.17.5 or later and Node.js on the daemon host. Set the controller URL, token file, CA file if required and a profile in **Kubernetes Sandbox**. Check the connection, save it and opt in the workspaces you want.
+- Paseo users need Paseo 0.17.5 or later and Node.js on the daemon host. Set the controller URL, token file, CA file if required and a profile in **Kubernetes Sandbox**. Check and save the connection, then choose a profile as you enable each workspace. Standard is selected by default when the token grants access.
 
 [Set up the controller and plugin](docs/setup.md).
 
-The controller creates a pod on first use. Agents and terminals in the same workspace share the pod. Archiving the workspace, disabling its opt-in or using **Stop sandbox** requests pod deletion. The profile's idle timeout also reclaims unused pods. Worktree data persists on the shared volume.
+The controller creates a pod on first use. Agents and terminals in the same workspace share the pod. Archiving the workspace, disabling its opt-in or using **Stop sandbox** requests pod deletion. The profile's idle timeout also reclaims unused pods. Worktree data persists on the shared volume. To change profiles, confirm stopping an existing sandbox first. Running processes and ephemeral state are lost when the pod is deleted.
 
 ## Development and releases
 

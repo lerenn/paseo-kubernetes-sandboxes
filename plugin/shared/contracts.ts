@@ -5,11 +5,14 @@ import { connectionSchema } from "./settings.js";
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
 
-// Connection check: reachability, token, and the profile. Reads only; never creates anything.
+export const sandboxProfile = z.object({ id: z.string(), label: z.string(), privileged: z.boolean() });
+export type SandboxProfile = z.infer<typeof sandboxProfile>;
+
+// Connection check and the profiles authorized by the token.
 export const controllerCheck = defineRpc({
   name: "controller.check",
   input: connectionSchema,
-  output: z.object({ checks: z.array(check), profiles: z.array(z.string()) }),
+  output: z.object({ checks: z.array(check), profiles: z.array(sandboxProfile) }),
 });
 
 export const sandboxState = z.enum(["running", "starting", "stopping", "failed", "absent", "unknown"]);
@@ -18,7 +21,6 @@ export const workspaceRow = z.object({
   id: z.string(),
   name: z.string(),
   directory: z.string(),
-  optedIn: z.boolean(),
   sandbox: sandboxState,
 });
 export const workspacesList = defineRpc({

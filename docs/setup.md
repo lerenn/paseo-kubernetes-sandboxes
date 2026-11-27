@@ -10,9 +10,17 @@ The daemon and the sandbox pods need concurrent access to the same files. Use a 
 
 For a PVC mounted on the daemon at `/srv/paseo/worktrees`, a worktree at `/srv/paseo/worktrees/feature` is mounted in the pod at that same absolute path from the PVC subdirectory `feature`. Use a mapping's `subPath` when the daemon's base directory corresponds to a subdirectory of the claim. Paths must sit below the configured base directory.
 
-Linked Git worktrees also need a `repository` mapping. The controller mounts the common Git directory at its original absolute path so the worktree's `.git` pointer resolves. The repository mapping may use the same PVC with a different base or subdirectory. Use an image containing a POSIX shell, `env`, Git, and the tools your agents require. Provide image pull secrets, resources, sidecars and pod placement through the profile where needed.
+Linked Git worktrees also need a `repository` mapping. The controller mounts the common Git directory at its original absolute path so the worktree's `.git` pointer resolves. The repository mapping may use the same PVC with a different base or subdirectory. Use an image containing a POSIX shell, `env`, Git, and the tools your agents require. Provide image pull secrets, resources, sidecars and pod placement through the profile where needed. Name the default profile `standard` so Paseo can preselect it when authorized. Standard containers run with privilege escalation disabled, all capabilities dropped and the runtime default seccomp profile. Sandbox pods do not mount a ServiceAccount token.
 
 Treat each profile's storage roots as authorization boundaries. A token holder may request worktrees and repository metadata anywhere below the roots of its permitted profiles. Use separate storage roots for mutually untrusted daemons. Tokens partition pod operations by principal. The shared checkout and common Git directory remain writable from both the daemon and pod. Use dedicated credentials inside sandbox images or administrator-managed mounts where Git or package registries require them. Forwarded command environment values and arguments are present in Kubernetes exec requests and can appear in API audit logs.
+
+### Optional Docker profile for trusted workspaces
+
+Define a separate profile with `docker.enabled: true` and a Docker-in-Docker image in `docker.image`. The main image needs the Docker CLI. The chart example includes the optional settings. Include the Docker profile in only the principal allowlists that need it. Paseo displays **Docker (privileged)** and requires a user to select it.
+
+The sidecar runs privileged and shares the workspace's exact worktree mount path and PVC subdirectory, so Docker bind mounts reference the same files. It listens on a Unix socket shared with the main container. The controller sets `DOCKER_HOST` and keeps daemon-host Docker settings from overriding it. Set `docker.socketGroup` and the main container's supplemental groups for non-root access. Docker and containerd data live on a separate disk-backed `emptyDir`. Use `docker.sizeLimit` to bound that storage and `docker.resources` to set resource requests and limits.
+
+Docker requires a cluster and namespace that allow privileged containers. Give access only to trusted daemons and workspaces. A privileged sidecar has broad node access. Docker images, containers and volumes in this sandbox are discarded when the sandbox pod is deleted.
 
 ### Issue a scoped token
 
@@ -59,12 +67,12 @@ The controller names and owns sandbox pods per release, principal and workspace.
 ## Paseo user setup
 
 1. Install the plugin from the release checkout on the daemon host with `paseo plugin install "$PWD/plugin"`. The manifest installs the plugin dependencies. Paseo 0.17.5 and Node.js 22 or later are supported.
-2. Open **Kubernetes Sandbox** and enter the controller HTTPS URL, absolute daemon-local token path, and absolute daemon-local CA path if the endpoint uses a private CA. Enter a profile provided by your administrator.
-3. Run **Check connection** to verify TLS, the token and its permitted profiles. Save the connection and opt in a workspace backed by the profile's shared storage.
-4. Open a new terminal or start an agent. **Refresh status** shows the sandbox state. **Stop sandbox** terminates that workspace's current pod and sessions. A later launch recreates it while the workspace stays opted in.
+2. Open **Kubernetes Sandbox** and enter the controller HTTPS URL, absolute daemon-local token path, and absolute daemon-local CA path if the endpoint uses a private CA.
+3. Run **Check connection** to verify TLS, the token and its permitted profiles. Save the connection. Select **Enable sandbox** for a workspace, choose a profile backed by its shared storage, and confirm. Paseo offers only profiles allowed by the token and saves the choice for that workspace.
+4. Open a new terminal or start an agent. **Refresh status** shows the sandbox state. **Stop sandbox** terminates that workspace's current pod and sessions. A later launch recreates it while the workspace stays opted in. To change profiles, first confirm **Stop and delete sandbox**, wait for **No sandbox** and select **Change profile**. Running processes and ephemeral state are lost on deletion. Shared worktree files are kept.
 
 Existing sessions keep their launch location until reopened. Opted-in launches fail if their controller or storage is unavailable. Disabling the plugin removes its launch hooks. Preserve the plugin installation and opt-in settings if those workspaces must keep running in Kubernetes.
 
 ### Upgrade from releases before 0.5
 
-Install the controller and prepare shared storage before upgrading the plugin. Existing shared-workspace opt-ins carry over by workspace ID. For old clone-mode workspaces, preserve any pod-local changes and move the checkout to the shared storage before enabling launches. Earlier pods, legacy RBAC, SSH Secrets and per-sandbox PVCs were managed by the old plugin. Inventory them and review ownership and data retention before removing them. The controller adopts only its own pods.
+Install the controller and prepare shared storage before upgrading the plugin. Existing opt-ins carry over by workspace ID. Choose a profile for each existing opt-in before launching again. For old clone-mode workspaces, preserve any pod-local changes and move the checkout to the shared storage before enabling launches. Earlier pods, legacy RBAC, SSH Secrets and per-sandbox PVCs were managed by the old plugin. Inventory them and review ownership and data retention before removing them. The controller adopts only its own pods.

@@ -121,7 +121,7 @@ function exitCode(payload) {
 
 // Serves one exec request: the client's frames drive a pod process; its output goes back as frames.
 // `open` is injectable (tests); `track(+1|-1)` reports activity to the idle sweeper.
-export function serveExec(request, response, { root, namespace, pod, open, track = () => {} }) {
+export function serveExec(request, response, { root, namespace, pod, open, track = () => {}, keepEnvironment = [] }) {
   const id = randomBytes(8).toString("hex");
   let conn = null;
   let remote = null;
@@ -183,6 +183,7 @@ export function serveExec(request, response, { root, namespace, pod, open, track
     let spec;
     try { spec = parseStart(payload, root); } catch (error) { return reply(400, error.message); }
     clearTimeout(startTimer);
+    for (const name of keepEnvironment) delete spec.env[name];
     remote = remoteCommand(id, spec);
     track(1);
     started = true;

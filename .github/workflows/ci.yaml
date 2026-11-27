@@ -9,6 +9,7 @@ jobs:
         with: {node-version: '22', cache: npm, cache-dependency-path: plugin/package-lock.json}
       - run: npm ci && npm run typecheck && npm test
         working-directory: plugin
+      - run: node .github/scripts/check-bundles.mjs && node .github/scripts/check-sidebar.mjs
   plugin-build:
     runs-on: ubuntu-latest
     steps:

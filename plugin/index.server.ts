@@ -29,7 +29,7 @@ export default function contribute(server: PluginServerContext) {
       list.entries.map(async (w) => {
         const on = optedIn(c, w.id);
         const sandbox = on && isConfigured(c) ? await getSandbox(c, w.id).then(state, () => "unknown" as const) : "absent" as const;
-        return { id: w.id, name: w.name, directory: w.workspaceDirectory ?? w.projectRootPath, optedIn: on, sandbox };
+        return { id: w.id, name: w.name, directory: w.workspaceDirectory ?? w.projectRootPath, sandbox };
       }),
     );
     return { workspaces: rows };

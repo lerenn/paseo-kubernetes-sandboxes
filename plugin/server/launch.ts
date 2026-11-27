@@ -1,12 +1,12 @@
 import launcher from "./launcher-source.generated.js";
-import type { Configuration } from "../shared/settings.js";
+import type { Connection } from "../shared/settings.js";
 
 export type Wrap = [string, ...string[]];
 
 // The wrap Paseo prepends to the command. It ends with `--` because Paseo appends the command directly.
 // The token is never in the wrap: the launcher reads it from the token file.
 export function buildWrap(
-  c: Pick<Configuration, "controllerUrl" | "tokenFile" | "caFile">,
+  c: Connection,
   workspaceId: string,
   opts: { cwd: string; envNames: string[] },
 ): Wrap {

@@ -146,6 +146,7 @@ export function Field({
 }
 export function Choice({
   theme,
+  role = "checkbox",
   label,
   description,
   checked,
@@ -153,6 +154,7 @@ export function Choice({
   disabled = false,
 }: {
   theme: Theme;
+  role?: "checkbox" | "radio";
   label: string;
   description?: string;
   checked: boolean;
@@ -161,7 +163,7 @@ export function Choice({
 }) {
   return (
     <Pressable
-      accessibilityRole="checkbox"
+      accessibilityRole={role}
       accessibilityLabel={label}
       accessibilityState={{ checked, disabled }}
       disabled={disabled}

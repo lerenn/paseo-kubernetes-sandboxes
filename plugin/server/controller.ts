@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
-import type { Configuration } from "../shared/settings.js";
+import { z } from "zod";
+import { sandboxProfile } from "../shared/contracts.js";
+import type { Connection } from "../shared/settings.js";
 
 export class ControllerError extends Error {
   constructor(
@@ -12,7 +14,6 @@ export class ControllerError extends Error {
 }
 
 export type SandboxStatus = { profile: string; phase: string; ready: boolean; deleting: boolean } | null;
-type Connection = Pick<Configuration, "controllerUrl" | "tokenFile" | "caFile">;
 
 // One JSON request to the controller. The token is read per call (a rotated file is picked up) and never logged.
 export function call<T>(c: Connection, method: string, path: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
@@ -69,7 +70,8 @@ export function call<T>(c: Connection, method: string, path: string, body?: unkn
 const sandboxPath = (workspaceId: string) => `/v1/sandboxes/${encodeURIComponent(workspaceId)}`;
 
 export const health = (c: Connection) => call<{ ok: boolean }>(c, "GET", "/healthz");
-export const profiles = async (c: Connection) => (await call<{ profiles: string[] }>(c, "GET", "/v1/profiles")).profiles;
+export const profiles = async (c: Connection) =>
+  z.object({ profiles: z.array(sandboxProfile) }).parse(await call(c, "GET", "/v1/profiles")).profiles;
 export const getSandbox = async (c: Connection, workspaceId: string) =>
   (await call<{ sandbox: SandboxStatus }>(c, "GET", sandboxPath(workspaceId))).sandbox;
 export const stopSandbox = (c: Connection, workspaceId: string) => call(c, "DELETE", sandboxPath(workspaceId));

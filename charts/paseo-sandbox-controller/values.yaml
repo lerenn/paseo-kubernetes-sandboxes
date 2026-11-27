@@ -9,6 +9,8 @@ tlsSecretName: ""
 # Map of profile names to image, worktree, optional repository, and administrator-owned pod configuration.
 # Optional idleMinutes (default 120, 0 disables) deletes a sandbox with no running command for that long.
 # A volume mapping has claimName, basePath (as seen by Paseo), and optional subPath.
+# The reserved standard profile is the Paseo default when available.
+# Docker support requires docker.enabled: true and docker.image on a separate profile.
 profiles: {}
 
 # Map of principal names to tokenSha256 and allowed profile names.

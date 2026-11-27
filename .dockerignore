@@ -1,0 +1,6 @@
+**
+!controller/
+!controller/Dockerfile
+!controller/package.json
+!controller/package-lock.json
+!controller/*.mjs

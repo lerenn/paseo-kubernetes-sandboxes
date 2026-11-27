@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { createSecureServer } from "node:http2";
 import { kubeOpener, serveExec } from "./exec.mjs";
 import { inCluster, kubeClient, KubernetesError } from "./kubernetes.mjs";
-import { createPolicy, sandboxName, volumeSubPath } from "./policy.mjs";
+import { createPolicy, profileRevision, sandboxName } from "./policy.mjs";
+import { buildPod, label, managedBy } from "./pod.mjs";
 
 const config = JSON.parse(readFileSync(process.env.CONTROLLER_CONFIG, "utf8"));
 const policy = createPolicy(config);
@@ -11,12 +12,6 @@ const connection = inCluster();
 const kube = kubeClient({ namespace, connection });
 const openExec = kubeOpener(connection);
 const serviceName = process.env.CONTROLLER_SERVICE;
-const managedBy = "paseo-sandbox-controller";
-const label = {
-  managed: "app.kubernetes.io/managed-by",
-  instance: "app.kubernetes.io/instance",
-  principal: "paseo.dev/principal",
-};
 const selector = `${label.managed}=${managedBy},${label.instance}=${serviceName}`;
 const service = await kube.getService(serviceName);
 const owner = { apiVersion: "v1", kind: "Service", name: serviceName, uid: service.metadata.uid };
@@ -78,49 +73,6 @@ function status(pod) {
   };
 }
 
-function buildPod(name, principal, profileName, profile, { root, gitDir }) {
-  const volumes = [];
-  const volumeMounts = [];
-  function mount(name, volume, path) {
-    volumes.push({ name, persistentVolumeClaim: { claimName: volume.claimName } });
-    volumeMounts.push({ name, mountPath: path, subPath: volumeSubPath(volume, path) });
-  }
-  mount("worktree", profile.worktree, root);
-  if (gitDir !== undefined) {
-    if (!profile.repository) throw new Error("This profile requires a repository volume for linked worktrees.");
-    if (typeof gitDir !== "string" || !gitDir.endsWith("/.git") ||
-        gitDir === root + "/.git" || root.startsWith(gitDir + "/") || gitDir.startsWith(root + "/")) {
-      throw new Error("Expected a separate Git metadata directory ending in /.git.");
-    }
-    mount("repository", profile.repository, gitDir);
-  }
-  return {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: {
-      name,
-      labels: { [label.managed]: managedBy, [label.principal]: principal, [label.instance]: serviceName },
-      ownerReferences: [owner],
-      annotations: { "paseo.dev/profile": profileName, "paseo.dev/worktree": root, "paseo.dev/repository": gitDir ?? "" },
-    },
-    spec: {
-      terminationGracePeriodSeconds: 5,
-      ...(profile.podSpec ?? {}),
-      restartPolicy: "Never",
-      automountServiceAccountToken: false,
-      volumes: [...(profile.podSpec?.volumes ?? []), ...volumes],
-      containers: [{
-        ...(profile.container ?? {}),
-        name: "main",
-        image: profile.image,
-        command: ["sh", "-c", "while :; do sleep 3600 & wait $!; done"],
-        workingDir: root,
-        volumeMounts: [...(profile.container?.volumeMounts ?? []), ...volumeMounts],
-      }, ...(profile.sidecars ?? [])],
-    },
-  };
-}
-
 async function readBody(request) {
   const chunks = [];
   let size = 0;
@@ -171,7 +123,7 @@ const server = createSecureServer({
         const body = await readBody(request);
         const profile = policy.profileFor(principal, body.profile);
         if (!profile) return send(response, 403, { error: "Profile is unavailable for this credential." });
-        desired = buildPod(name, principal, body.profile, profile, body);
+        desired = buildPod(name, principal, body.profile, profile, body, owner);
       } catch {
         return send(response, 400, { error: "Invalid shared-worktree request. Check the profile's volume paths." });
       }
@@ -187,12 +139,17 @@ const server = createSecureServer({
         if (request.httpVersionMajor !== 2) return send(response, 505, { error: "Command streaming requires HTTP/2." });
         const sandbox = status(pod);
         if (!sandbox?.ready || sandbox.deleting) return send(response, 409, { error: "Sandbox is not ready." });
-        if (!policy.profileFor(principal, sandbox.profile)) return send(response, 403, { error: "Profile access has been removed." });
+        const profile = policy.profileFor(principal, sandbox.profile);
+        if (!profile) return send(response, 403, { error: "Profile access has been removed." });
+        if (pod.metadata.annotations["paseo.dev/profile-revision"] !== profileRevision(profile)) {
+          return send(response, 409, { error: "Profile settings changed. Stop the sandbox and launch again." });
+        }
         if (response.destroyed) return;
         touch(name, 1);
         response.once("close", () => touch(name, -1));
         return serveExec(request, response, {
           root: pod.metadata.annotations["paseo.dev/worktree"], namespace, pod: name, open: openExec,
+          keepEnvironment: profile.docker?.enabled ? ["DOCKER_HOST", "DOCKER_CONTEXT"] : [],
         });
       }
       if (request.method === "GET") return send(response, 200, { sandbox: status(pod) });

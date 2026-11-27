@@ -20,13 +20,13 @@
 <main id="content">
     <h1>How it works</h1>
     <h2 id="launch">Launch hooks</h2>
-    <p>When an opted-in workspace opens an agent or terminal or runs a command, the plugin asks the controller to prepare its sandbox. The controller checks the token and selected profile, then starts or reuses a pod. Paseo runs a local Node.js launcher that connects to the controller.</p>
+    <p>When an opted-in workspace opens an agent or terminal or runs a command, the plugin asks the controller to prepare its sandbox. The controller checks the token and the profile saved for that workspace, then starts or reuses a pod. Paseo runs a local Node.js launcher that connects to the controller.</p>
     <h2 id="streaming">Command and terminal streaming</h2>
     <p>The launcher sends input and terminal size changes over HTTP/2. The controller bridges the stream to Kubernetes exec and returns standard output, standard error and the command's exit status. Interactive terminals use a remote TTY and return its combined output.</p>
     <h2 id="storage">Shared storage</h2>
     <p>The worktree mounts at the same path in the daemon and sandbox. Linked worktrees also mount their common Git metadata. The pod can write to that storage, so profiles should have separate storage roots for daemons that should have separate file access.</p>
     <h2 id="cleanup">Cleanup</h2>
-    <p>Archiving, opting out or explicitly stopping a workspace requests deletion of its pod. Idle timeout defaults to two hours. Active commands and open terminals keep a sandbox alive. Deleting the Helm release removes the controller's pods through Service ownership. Shared storage persists across pod deletion.</p>
+    <p>Archiving, opting out or explicitly stopping a workspace requests deletion of its pod. Idle timeout defaults to two hours. Active commands and open terminals keep a sandbox alive. Deleting the Helm release removes the controller's pods through Service ownership. Shared storage persists across pod deletion. Changing an active profile requires confirming a stop first. Processes and temporary files are lost when that pod is removed.</p>
   </main>
 </div>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>

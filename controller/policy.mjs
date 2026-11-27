@@ -29,18 +29,52 @@ function validateVolume(volume) {
   }
 }
 
+function validateProfile(name, profile) {
+  if (!identifier.test(name) || typeof profile?.image !== "string" || !profile.image.trim()) {
+    throw new Error("Each sandbox profile requires a valid name and an image.");
+  }
+  if (profile.label !== undefined && (typeof profile.label !== "string" || !profile.label.trim() || profile.label.length > 80)) {
+    throw new Error("A profile label must contain 1 to 80 characters.");
+  }
+  if (profile.idleMinutes !== undefined && !(Number.isSafeInteger(profile.idleMinutes) && profile.idleMinutes >= 0)) {
+    throw new Error("idleMinutes must be a non-negative integer (0 disables the idle timeout).");
+  }
+  const docker = profile.docker;
+  if (docker && (typeof docker.enabled !== "boolean" ||
+      (docker.enabled && (name === "standard" || typeof docker.image !== "string" || !docker.image.trim())))) {
+    throw new Error("Enable Docker in a separate profile and provide a Docker-in-Docker image.");
+  }
+  if (name === "docker" && !docker?.enabled) throw new Error("Enable the Docker sidecar to configure the docker profile.");
+  if (docker?.socketGroup !== undefined && (!Number.isSafeInteger(docker.socketGroup) || docker.socketGroup < 0)) {
+    throw new Error("The Docker socket group must be a non-negative numeric group ID.");
+  }
+  const pod = profile.podSpec;
+  if (pod?.hostNetwork || pod?.hostPID || pod?.hostIPC || pod?.volumes?.some(({ hostPath }) => hostPath)) {
+    throw new Error("Sandbox profiles cannot use host namespaces or hostPath volumes.");
+  }
+  for (const container of [profile.container, ...(profile.sidecars ?? []), ...(pod?.initContainers ?? [])]) {
+    const security = container?.securityContext;
+    if (security?.privileged || security?.allowPrivilegeEscalation || security?.capabilities?.add?.length) {
+      throw new Error("Only the controller-managed Docker sidecar can run with elevated privileges.");
+    }
+  }
+  validateVolume(profile.worktree);
+  if (profile.repository) validateVolume(profile.repository);
+}
+
+function profileInfo(id, profile) {
+  const privileged = Boolean(profile.docker?.enabled);
+  const label = profile.label?.trim() ?? (id === "standard" ? "Standard" : privileged ? "Docker" : id);
+  return { id, label: privileged ? `${label} (privileged)` : label, privileged };
+}
+
+export function profileRevision(profile) {
+  return digest(JSON.stringify(profile)).toString("hex");
+}
+
 export function createPolicy(config) {
   const profiles = new Map(Object.entries(config.profiles ?? {}));
-  for (const [name, profile] of profiles) {
-    if (!identifier.test(name) || typeof profile?.image !== "string" || !profile.image.trim()) {
-      throw new Error("Each sandbox profile requires a valid name and an image.");
-    }
-    if (profile.idleMinutes !== undefined && !(Number.isInteger(profile.idleMinutes) && profile.idleMinutes >= 0)) {
-      throw new Error("idleMinutes must be a non-negative integer (0 disables the idle timeout).");
-    }
-    validateVolume(profile.worktree);
-    if (profile.repository) validateVolume(profile.repository);
-  }
+  for (const [name, profile] of profiles) validateProfile(name, profile);
   if (!profiles.size) throw new Error("Configure at least one shared-worktree profile.");
 
   const principals = new Map();
@@ -73,7 +107,7 @@ export function createPolicy(config) {
       return (profiles.get(name)?.idleMinutes ?? 120) * 60_000;
     },
     profilesFor(principal) {
-      return [...(principals.get(principal)?.profiles ?? [])];
+      return Array.from(principals.get(principal)?.profiles ?? [], (id) => profileInfo(id, profiles.get(id)));
     },
     profileFor(principal, name) {
       return principals.get(principal)?.profiles.has(name) ? profiles.get(name) : undefined;
