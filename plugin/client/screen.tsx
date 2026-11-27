@@ -10,10 +10,12 @@ import {
 } from "../shared/settings.js";
 import { Badge, Button, Card, Choice, Field } from "./components.js";
 
+const controllerIcon = "Server";
+
 const TABS = [
   { id: "workspaces", label: "Workspaces", icon: "FolderGit2" },
   { id: "profiles", label: "Profiles", icon: "Layers" },
-  { id: "connection", label: "Controllers", icon: "Server" },
+  { id: "connection", label: "Controllers", icon: controllerIcon },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -147,6 +149,18 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
     setSelection({ workspace, connectionId, profile: profile ?? standard?.id });
   }
 
+  const tableFrame = [table.frame, { borderColor: theme.colors.border }];
+  const tableHeader = [table.row, table.header, { backgroundColor: theme.colors.surface2 }];
+  const tableRow = [table.row, table.divider, { borderColor: theme.colors.border }];
+  const profileRow = layout.compact ? table.compact : undefined;
+  const profileSources = tab === "profiles" ? config.connections.map((connection) => {
+    const result = checks?.get(connection.id);
+    return { connection, result, status: profileAvailability(connection, result) };
+  }) : [];
+  const profileRows = profileSources.flatMap(({ connection, result, status }) =>
+    status ? [] : (result?.profiles ?? []).map((profile) => ({ connection, profile })),
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
       <View style={{ paddingHorizontal: pad, paddingTop: pad, gap: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
@@ -184,16 +198,16 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
         <View style={{ width: "100%", maxWidth: 820, marginHorizontal: "auto", gap: 20 }}>
           {(error || settings.saveError) && <Text accessibilityRole="alert" style={{ ...text, color: theme.colors.statusDanger }}>{error ?? settings.saveError}</Text>}
-          {tab === "connection" && <Card theme={theme} icon="Server" title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
+          {tab === "connection" && <Card theme={theme} icon={controllerIcon} title="Controller connections" description="Use the private endpoints and credential files provided by your administrator.">
             {config.connections.length > 0 && (
-              <View role="table" accessibilityLabel="Saved controller connections" style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8 }}>
-                <View role="row" style={[connectionTable.row, { backgroundColor: theme.colors.surface2, borderTopLeftRadius: 7, borderTopRightRadius: 7 }]}>
-                  <Text role="columnheader" style={[text, connectionTable.name, connectionTable.heading]}>Name</Text>
-                  <Text role="columnheader" style={[text, connectionTable.id, connectionTable.heading]}>ID</Text>
-                  <Text role="columnheader" style={[text, connectionTable.actions, connectionTable.heading, connectionTable.actionsHeading]}>Actions</Text>
+              <View role="table" accessibilityLabel="Saved controller connections" style={tableFrame}>
+                <View role="row" style={tableHeader}>
+                  <Text role="columnheader" style={[text, connectionTable.name, table.heading]}>Name</Text>
+                  <Text role="columnheader" style={[text, connectionTable.id, table.heading]}>ID</Text>
+                  <Text role="columnheader" style={[text, connectionTable.actions, table.heading, connectionTable.actionsHeading]}>Actions</Text>
                 </View>
                 {config.connections.map((connection) => (
-                  <View key={connection.id} role="row" style={[connectionTable.row, { borderTopWidth: 1, borderColor: theme.colors.border }]}>
+                  <View key={connection.id} role="row" style={tableRow}>
                     <Text role="cell" style={[text, connectionTable.name, { color: theme.colors.foreground }]}>{connection.name}</Text>
                     <Text role="cell" style={[text, connectionTable.id]}>{connection.id}</Text>
                     <View role="cell" style={connectionTable.actions}>
@@ -268,25 +282,40 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
 
           {tab === "profiles" && <Card theme={theme} icon="Layers" title="Profiles" description="Profiles available to each controller’s saved token.">
             {config.connections.length === 0 && <Text style={text}>No controllers configured. Add a connection in Controllers.</Text>}
-            {config.connections.map((connection) => {
-              const result = checks?.get(connection.id);
-              const status = profileAvailability(connection, result);
-              return (
-                <View key={connection.id} style={{ borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 12, gap: 8 }}>
-                  <Text role="heading" style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>{connection.name}</Text>
-                  <Text style={text}>{connection.id}</Text>
-                  {status ? <Text style={text}>{status}</Text> : result?.profiles.map((profile) => (
-                    <View key={profile.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                      <View style={{ flexGrow: 1, flexShrink: 1 }}>
-                        <Text style={{ ...text, color: theme.colors.foreground }}>{profile.label}</Text>
-                        <Text style={text}>{profile.id}</Text>
+            {profileRows.length > 0 && (
+              <View role="table" accessibilityLabel="Available profiles" style={tableFrame}>
+                <View role="row" style={[tableHeader, profileRow]}>
+                  <Text role="columnheader" style={[text, table.heading, profileTable.profile]}>Profile</Text>
+                  <Text role="columnheader" style={[text, table.heading, profileTable.id]}>ID</Text>
+                  <Text role="columnheader" style={[text, table.heading, profileTable.controller]}>Controller</Text>
+                  <Text role="columnheader" style={[text, table.heading, profileTable.privilege]}>Privilege</Text>
+                </View>
+                {profileRows.map(({ connection, profile }) => (
+                  <View key={JSON.stringify([connection.id, profile.id])} role="row" style={[tableRow, profileRow]}>
+                    <Text role="cell" style={[text, profileTable.profile, { color: theme.colors.foreground }]}>{profile.label}</Text>
+                    <Text role="cell" style={[text, profileTable.id]}>{profile.id}</Text>
+                    <View role="cell" style={[profileTable.controller, profileTable.controllerCell]}>
+                      <Icon name={controllerIcon} size={14} color={theme.colors.foregroundMuted} />
+                      <View style={profileTable.controllerLabel}>
+                        <Text style={[text, { color: theme.colors.foreground }]}>{connection.name}</Text>
+                        <Text style={text}>{connection.id}</Text>
                       </View>
+                    </View>
+                    <View role="cell" style={profileTable.privilege}>
                       {profile.privileged && <Badge theme={theme} label="Privileged" tone="warning" />}
                     </View>
-                  ))}
-                </View>
-              );
-            })}
+                  </View>
+                ))}
+              </View>
+            )}
+            {profileSources.map(({ connection, status }) => status && (
+              <View key={connection.id} style={[table.divider, { borderColor: theme.colors.border, paddingTop: 12, gap: 4 }]}>
+                <Text role="heading" style={[text, table.heading, { color: theme.colors.foreground }]}>
+                  {connection.name} <Text style={text}>{connection.id}</Text>
+                </Text>
+                <Text style={text}>{status}</Text>
+              </View>
+            ))}
           </Card>}
 
           {tab === "workspaces" && <Card theme={theme} icon="FolderGit2" title="Workspaces" description="Choose a controller connection and its sandbox profile for each workspace.">
@@ -389,7 +418,13 @@ export function SandboxScreen({ theme, layout }: PluginScreenProps) {
   );
 }
 
-const connectionTable = StyleSheet.create({
+const table = StyleSheet.create({
+  frame: { borderWidth: 1, borderRadius: 8 },
+  header: { borderTopLeftRadius: 7, borderTopRightRadius: 7 },
+  divider: { borderTopWidth: 1 },
+  heading: { fontWeight: "600" },
+  compact: { gap: 4, paddingHorizontal: 5 },
+
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -397,9 +432,21 @@ const connectionTable = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+});
+
+const connectionTable = StyleSheet.create({
   name: { flex: 3, minWidth: 0 },
   id: { flex: 2.5, minWidth: 0 },
   actions: { width: 60, alignItems: "flex-end" },
-  heading: { fontWeight: "600" },
   actionsHeading: { textAlign: "right" },
+});
+
+
+const profileTable = StyleSheet.create({
+  profile: { flex: 3, minWidth: 0 },
+  id: { flex: 2.5, minWidth: 0 },
+  controller: { flex: 3.5, minWidth: 0 },
+  controllerCell: { flexDirection: "row", alignItems: "center", gap: 4 },
+  controllerLabel: { flex: 1, minWidth: 0 },
+  privilege: { width: 80 },
 });
