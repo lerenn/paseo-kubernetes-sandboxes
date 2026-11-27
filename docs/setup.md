@@ -46,10 +46,10 @@ Each controller accepts only its configured principals and profiles, scopes pod 
 5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.1/paseo-sandbox-controller-0.6.1.tgz
-   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.1 -n paseo --wait
-   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.1 -n standard --wait
-   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.1 -n docker --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.2/paseo-sandbox-controller-0.6.2.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.2 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.2 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.2 -n docker --wait
    ```
 
    For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
@@ -78,10 +78,10 @@ The controller names and owns sandbox pods per release, principal and workspace.
 
 ## Paseo user setup
 
-1. Install on the daemon running Paseo 0.17.5 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.1`.
+1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.2`.
 2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
-3. Open **Workspaces → Enable sandbox** and save a profile. Standard is preselected when authorized. Choose **Docker (privileged)** explicitly for trusted workspaces that need it. The same token grants the profiles your administrator assigned.
-4. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.
+3. In **New workspace**, choose the host and open **Execution**. Select **Local** where permitted, or choose a Gateway profile from the selected host. Choose **Docker** explicitly for workspaces that need its privileged container. The selected profile applies before setup or the first agent starts.
+4. To route an existing workspace, open **Kubernetes Sandbox → Workspaces** and save a profile. If the first agent failed, return to the same workspace draft and retry after the profile is saved. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.
 
 Assigned workspace launches require the saved Gateway and its profile grant. To require a profile on new workspace launches, enable **Require a sandbox profile** in the Gateway tab.
 

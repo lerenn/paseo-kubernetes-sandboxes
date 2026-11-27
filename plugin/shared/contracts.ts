@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { connectionSchema, settingsSchema } from "./settings.js";
+import { connectionSchema, profileId, settingsSchema } from "./settings.js";
 
 export const checkStatus = z.enum(["ok", "fail", "unknown"]);
 export const check = z.object({ id: z.string(), label: z.string(), status: checkStatus, detail: z.string() });
@@ -41,6 +41,10 @@ export const workspaceRow = z.object({
   id: z.string(),
   name: z.string(),
   directory: z.string(),
+  assignedProfile: z.string().optional(),
+  assignedPrivilege: z.boolean().optional(),
+  assignedConnection: z.string().optional(),
+  createdWithProfile: z.boolean(),
   sandbox: sandboxState,
 });
 export const workspacesList = defineRpc({
@@ -61,4 +65,15 @@ export const prepareSettingsSave = defineRpc({
   name: "settings.prepare-save",
   input: z.object({ revision: z.string(), values: settingsSchema }),
   output: z.object({}),
+});
+
+export const executionOptions = defineRpc({
+  name: "execution.options",
+  input: z.object({}),
+  output: z.object({
+    localAllowed: z.boolean(),
+    connectionId: profileId.optional(),
+    profiles: z.array(sandboxProfile),
+    error: z.string().optional(),
+  }),
 });

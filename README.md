@@ -7,7 +7,7 @@ An administrator installs the Gateway and backend controllers with Helm. The Pas
 ## Install and use
 
 - Administrators need Kubernetes 1.34 or later, Helm 3 or later, shared persistent storage and an endpoint reachable from the Paseo daemon. The endpoint must carry HTTP/2.
-- Paseo users need Paseo 0.17.5 or later and Node.js on the daemon host. Set the Gateway URL, token file, CA file if required and a profile in **Kubernetes Sandbox**. Check and save the connection, then choose a profile as you enable each workspace. Standard is selected by default when the token grants access.
+- Paseo users need Paseo 0.18.0 or later and Node.js on the daemon host. Check and save the Gateway URL, token file and CA file if required in **Kubernetes Sandbox**. Choose an authorized profile in **New workspace → Execution**, or assign a profile to an existing workspace from **Kubernetes Sandbox → Workspaces**.
 
 [Set up the Gateway, controllers and plugin](docs/setup.md).
 
