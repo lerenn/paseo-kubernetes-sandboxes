@@ -77,6 +77,7 @@ export function Field({
   onChange,
   placeholder,
   hint,
+  help,
   error,
   disabled = false,
   secret = false,
@@ -87,23 +88,31 @@ export function Field({
   onChange(value: string): void;
   placeholder?: string;
   hint?: string;
+  help?: ReactNode;
   /** A problem with the value: replaces the hint, in the danger colour. */
   error?: string;
   disabled?: boolean;
   secret?: boolean;
 }) {
   const [focus, setFocus] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   return (
     <View style={{ gap: 7 }}>
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: "500",
-          color: theme.colors.foreground,
-        }}
-      >
-        {label}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Text style={{ fontSize: 14, fontWeight: "500", color: theme.colors.foreground }}>{label}</Text>
+        {help && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Help for ${label}`}
+            aria-expanded={helpOpen}
+            onPress={() => setHelpOpen(!helpOpen)}
+            style={{ width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
+          >
+            <Icon name="Info" size={15} color={theme.colors.foregroundMuted} />
+          </Pressable>
+        )}
+      </View>
+      {helpOpen && help}
       <TextInput
         accessibilityLabel={label}
         value={value}

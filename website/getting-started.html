@@ -13,26 +13,21 @@
 <main id="content">
 <article class="prose">
   <h1>Getting started</h1>
-  <p class="lead">Install the controller in Kubernetes, then connect the Paseo daemon.</p>
-  <h2>Install the controller</h2>
-  <ol>
-    <li>Use Kubernetes 1.34 or later and a dedicated namespace. Pre-create the shared storage claims and prepare a sandbox image with a shell, Git and the tools agents need.</li>
-    <li>Use the example Helm values to define a profile with the image, PVC names and daemon paths. Generate a separate token for each daemon and put its SHA-256 digest and permitted profiles in the values.</li>
-    <li>Install the Helm chart and give each daemon a private HTTP/2-capable route to the Service. Supply the serving CA and the daemon's raw token through daemon-local files.</li>
-  </ol>
-  <pre><code>helm upgrade --install sandbox \
-  oci://ghcr.io/lerenn/paseo-kubernetes-sandboxes/charts/paseo-sandbox-controller \
-  --version 0.5.0 --namespace paseo-sandboxes --create-namespace \
-  --values controller-values.yaml --wait</code></pre>
-  <p><a href="https://github.com/lerenn/paseo-kubernetes-sandboxes/blob/main/docs/setup.md">Administrator setup and example values</a></p>
-  <h2>Connect Paseo</h2>
-  <ol>
-    <li>On a daemon running Paseo 0.17.5 or later and Node.js 22 or later, install the plugin from the release checkout.</li>
-    <li>Open <strong>Kubernetes Sandbox</strong> and enter the controller URL, absolute token path and CA path if required.</li>
-    <li>Select <strong>Check connection</strong>, save the settings and select <strong>Enable sandbox</strong> for a workspace on the shared storage. Choose a profile from the authorized list. Standard is preselected when available.</li>
-    <li>Open a new terminal and select <strong>Refresh status</strong> to see the workspace pod.</li>
-  </ol>
-  <pre><code>paseo plugin install "$PWD/plugin"</code></pre>
+  <section aria-labelledby="admin-setup">
+    <h2 id="admin-setup">Admin setup</h2>
+    <p>On Kubernetes 1.34 or later, deploy the controller with Helm in a dedicated namespace. Configure a sandbox image, shared storage and profiles, and provision a scoped token for each daemon.</p>
+    <p>Give the user a private HTTPS endpoint reachable over HTTP/2 from the Paseo daemon, the absolute path to the token file on that daemon, and the CA file path if needed. For commands and details on TLS, storage and tokens, see the <a href="reference.html#controller-install">Reference</a>.</p>
+  </section>
+  <section aria-labelledby="user-setup">
+    <h2 id="user-setup">User setup</h2>
+    <ol>
+      <li>If needed, install the plugin on the daemon running Paseo 0.17.5 or later and Node.js 22 or later.
+        <pre><code>paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.5.1</code></pre>
+      </li>
+      <li>In <strong>Kubernetes Sandbox</strong>, paste the controller URL and absolute file paths as seen by the daemon, including inside its container if applicable. Select <strong>Save connection</strong>, then <strong>Check connection</strong>.</li>
+      <li>Under <strong>Workspaces</strong>, select <strong>Enable sandbox</strong>, choose an authorized profile and confirm with <strong>Enable with profile</strong>.</li>
+    </ol>
+  </section>
 </article>
 </main>
 <footer class="site"><div class="inner">Kubernetes Sandbox for <a href="https://paseo.sh">Paseo</a>. Source on <a href="https://github.com/lerenn/paseo-kubernetes-sandboxes">GitHub</a>.</div></footer>
