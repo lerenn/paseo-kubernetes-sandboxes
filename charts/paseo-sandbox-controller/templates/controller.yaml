@@ -63,7 +63,11 @@ spec:
     rotationPolicy: Always
 ---
 {{- end }}
-{{- $config := dict "profiles" (required "Configure at least one sandbox profile." $profiles) "principals" (required "Configure at least one controller principal." $principals) "allowDirect" .Values.controller.allowDirectMigration | toJson }}
+{{- $workspaceProfiles := dict }}
+{{- range $profileName, $profile := $profiles }}
+{{- $_ := set $workspaceProfiles $profileName (omit $profile "warmPoolCount") }}
+{{- end }}
+{{- $config := dict "profiles" (required "Configure at least one sandbox profile." $workspaceProfiles) "principals" (required "Configure at least one controller principal." $principals) "allowDirect" .Values.controller.allowDirectMigration | toJson }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

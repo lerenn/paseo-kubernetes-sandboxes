@@ -14,6 +14,10 @@ Linked Git worktrees also need a `repository` mapping. The controller mounts the
 
 Set CPU, memory and ephemeral-storage requests and limits in `container.resources` for the main container, `sidecars[].resources` for ordinary sidecars, `docker.resources` for the managed Docker sidecar, and `podSpec.initContainers[].resources` for init containers. The Profiles table lists these administrator-configured values per container starting with controller and plugin v0.5.6. **Unset** means the field is omitted from the container configuration. Kubernetes admission can supply defaults. **Unavailable from controller** means the controller did not return resource metadata.
 
+Set `controller.profiles.<profile>.warmPoolCount` to the number of standby replicas for that backend profile. Omit it or set it to `0` to disable warming. Helm manages a separate Deployment that pulls only the profile's main image. Standby pods use a non-root shell and carry no workspace volumes, workload credentials, init containers or sidecars. Kubernetes can use the profile's image pull secret references to fetch a private image. Warming a Docker profile only pulls its main image and leaves the Docker daemon off.
+
+The standby Deployment uses the profile's node placement settings and runtime class. Review placement rules that depend on pod labels, and ensure namespace admission and quotas allow these pods. Each workspace still gets a fresh pod with its exact worktree `subPath`. The scheduler places it normally and the node can reuse cached layers when the image is present there. A workspace can land on a different node, and the cache and registry remain subject to the image pull policy. Scheduling, volume mounts, image checks, sidecar readiness and startup can still add latency. Changing the count updates only the standby Deployment and leaves the controller's workspace profile configuration intact.
+
 Ephemeral storage covers local pod storage usage such as writable layers, logs and disk-backed `emptyDir` volumes. Persistent worktrees and repositories use shared RWX PVCs. `docker.sizeLimit` caps the separate Docker state `emptyDir` volume and is configured separately from container ephemeral-storage requests and limits.
 
 Treat each profile's storage roots as authorization boundaries. A token holder may request worktrees and repository metadata anywhere below the roots of its permitted profiles. Use separate storage roots for mutually untrusted daemons. Tokens partition pod operations by principal. The shared checkout and common Git directory remain writable from both the daemon and pod. Use dedicated credentials inside sandbox images or administrator-managed mounts where Git or package registries require them. Forwarded command environment values and arguments are present in Kubernetes exec requests and can appear in API audit logs.
@@ -114,10 +118,10 @@ policy and identity details.
 5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.4/paseo-sandbox-controller-0.6.4.tgz
-   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.4 -n paseo --wait
-   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.4 -n standard --wait
-   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.4 -n docker --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.5/paseo-sandbox-controller-0.6.5.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.5 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.5 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.5 -n docker --wait
    ```
 
    For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
@@ -148,7 +152,7 @@ Set `gateway.backends.<id>.clusterDisplayName` in the shared installation values
 
 ## Paseo user setup
 
-1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.4`.
+1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.5`.
 2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
 3. In **New workspace**, choose the host and open **Execution**. Select **Local** where permitted, or choose a Gateway profile from the selected host. Choose **Docker** explicitly for workspaces that need its privileged container. The selected profile applies before setup or the first agent starts.
 4. To route an existing workspace, open **Kubernetes Sandbox → Workspaces** and save a profile. If the first agent failed, return to the same workspace draft and retry after the profile is saved. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.

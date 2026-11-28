@@ -18,6 +18,7 @@ controller:
   # Existing serving TLS Secret (tls.crt, tls.key). Empty uses cert-manager.
   tlsSecretName: ""
   # Profile names map to the image, shared worktree, optional repository and pod configuration.
+  # Set warmPoolCount on individual backend profiles to keep standby image-warming pods (default 0).
   profiles: null
   # Principal names map to the Gateway DNS SAN and a list of allowed profiles.
   principals: null
