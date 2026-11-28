@@ -1,0 +1,149 @@
+# Opt-in guest policy for a dedicated namespace and the paseo-docker Helm backend.
+# Replace the three example image references with the approved image digests.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: paseo-docker-guest
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+  variables:
+    - name: pod
+      expression: object.spec
+    - name: controller
+      expression: "'paseo-docker-sandbox-controller'"
+    - name: workspacePath
+      expression: "('paseo.dev/worktree' in object.metadata.annotations) ? object.metadata.annotations['paseo.dev/worktree'] : ''"
+    - name: repositoryPath
+      expression: "('paseo.dev/repository' in object.metadata.annotations) ? object.metadata.annotations['paseo.dev/repository'] : ''"
+    - name: workspaceMount
+      expression: >-
+        variables.workspacePath.matches('^/shared/worktrees/([A-Za-z0-9_-][A-Za-z0-9._-]*/)*[A-Za-z0-9_-][A-Za-z0-9._-]*$')
+    - name: repositoryMount
+      expression: >-
+        variables.repositoryPath.matches('^/shared/repositories/([A-Za-z0-9_-][A-Za-z0-9._-]*/)*[A-Za-z0-9_-][A-Za-z0-9._-]*/[.]git$')
+  validations:
+    - expression: >-
+        (!has(request.subResource) || request.subResource == '') &&
+        (request.operation != 'UPDATE' || (object.spec == oldObject.spec &&
+          (!object.metadata.name.startsWith('sbx-') ||
+            (object.metadata.annotations == oldObject.metadata.annotations &&
+             object.metadata.labels == oldObject.metadata.labels &&
+             object.metadata.ownerReferences == oldObject.metadata.ownerReferences))))
+      message: "The Docker guest allows only metadata updates to admitted pods."
+    - expression: >-
+        (!has(variables.pod.hostNetwork) || !variables.pod.hostNetwork) &&
+        (!has(variables.pod.hostPID) || !variables.pod.hostPID) &&
+        (!has(variables.pod.hostIPC) || !variables.pod.hostIPC) &&
+        (!has(variables.pod.shareProcessNamespace) || !variables.pod.shareProcessNamespace) &&
+        (!has(variables.pod.initContainers) || size(variables.pod.initContainers) == 0) &&
+        (!has(variables.pod.ephemeralContainers) || size(variables.pod.ephemeralContainers) == 0) &&
+        (!has(variables.pod.securityContext) ||
+          (!has(variables.pod.securityContext.sysctls) && !has(variables.pod.securityContext.windowsOptions) &&
+           !has(variables.pod.securityContext.seLinuxOptions) && !has(variables.pod.securityContext.appArmorProfile) &&
+           (!has(variables.pod.securityContext.seccompProfile) || variables.pod.securityContext.seccompProfile.type == 'RuntimeDefault'))) &&
+        variables.pod.containers.all(c,
+          (!has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) &&
+          !has(c.volumeDevices) &&
+          (!has(c.securityContext) ||
+            ((!has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') &&
+             !has(c.securityContext.windowsOptions) && !has(c.securityContext.seLinuxOptions) &&
+             !has(c.securityContext.appArmorProfile))))
+      message: "The Docker guest restricts host access, security context and additional container types."
+    - expression: >-
+        request.operation == 'UPDATE' ||
+        (
+          request.userInfo.username == 'system:serviceaccount:kube-system:replicaset-controller' &&
+          object.metadata.name.startsWith(variables.controller + '-') &&
+          has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+          object.metadata.ownerReferences[0].kind == 'ReplicaSet' &&
+          object.metadata.ownerReferences[0].name.startsWith(variables.controller + '-') &&
+          variables.pod.serviceAccountName == variables.controller &&
+          size(variables.pod.containers) == 1 &&
+          variables.pod.containers.all(c, c.name == 'controller' &&
+            c.image == 'registry.example.invalid/paseo-controller@sha256:1111111111111111111111111111111111111111111111111111111111111111' &&
+            !has(c.command) && !has(c.args) && !has(c.lifecycle) &&
+            has(c.securityContext) &&
+            (!has(c.securityContext.privileged) || !c.securityContext.privileged) &&
+            has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation &&
+            has(c.securityContext.capabilities) && c.securityContext.capabilities.drop == ['ALL'] &&
+            (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0) &&
+            has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type == 'RuntimeDefault') &&
+          variables.pod.volumes.all(v, has(v.configMap) || has(v.secret) || has(v.emptyDir) || has(v.projected))
+        ) ||
+        (
+          request.userInfo.username == 'system:serviceaccount:paseo-docker-guest:paseo-docker-sandbox-controller' &&
+          object.metadata.name.matches('^sbx-[0-9a-f]{32}$') &&
+          'app.kubernetes.io/managed-by' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/managed-by'] == 'paseo-sandbox-controller' &&
+          'app.kubernetes.io/instance' in object.metadata.labels &&
+          object.metadata.labels['app.kubernetes.io/instance'] == variables.controller &&
+          has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+          object.metadata.ownerReferences[0].apiVersion == 'v1' &&
+          object.metadata.ownerReferences[0].kind == 'Service' &&
+          object.metadata.ownerReferences[0].name == variables.controller &&
+          'paseo.dev/profile' in object.metadata.annotations &&
+          object.metadata.annotations['paseo.dev/profile'] == 'docker' &&
+          has(variables.pod.automountServiceAccountToken) && !variables.pod.automountServiceAccountToken &&
+          variables.pod.serviceAccountName == 'default' &&
+          variables.pod.restartPolicy == 'Never' &&
+          variables.workspaceMount &&
+          (variables.repositoryPath == '' || variables.repositoryMount) &&
+          size(variables.pod.volumes) == (variables.repositoryPath == '' ? 3 : 4) &&
+          variables.pod.volumes.all(v,
+            (v.name == 'worktree' && has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'docker-worktrees') ||
+            (v.name == 'repository' && variables.repositoryMount && has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'docker-repositories') ||
+            (v.name == 'docker-socket' && has(v.emptyDir) && (!has(v.emptyDir.medium) || v.emptyDir.medium == '')) ||
+            (v.name == 'docker-state' && has(v.emptyDir) && (!has(v.emptyDir.medium) || v.emptyDir.medium == '') &&
+              has(v.emptyDir.sizeLimit) && quantity(v.emptyDir.sizeLimit).compareTo(quantity('10Gi')) == 0)) &&
+          size(variables.pod.containers) == 2 &&
+          variables.pod.containers.all(c,
+            has(c.volumeMounts) &&
+            c.volumeMounts.all(m, (!has(m.mountPropagation) || m.mountPropagation == 'None') &&
+              !has(m.subPathExpr)) &&
+            c.volumeMounts.exists(m, m.name == 'worktree' && m.mountPath == variables.workspacePath &&
+              has(m.subPath) && m.subPath == variables.workspacePath.substring(size('/shared/'))) &&
+            c.volumeMounts.exists(m, m.name == 'docker-socket' && m.mountPath == '/run/paseo-docker' && !has(m.subPath)) &&
+            ((c.name == 'main' &&
+              c.image == 'registry.example.invalid/paseo-workspace@sha256:2222222222222222222222222222222222222222222222222222222222222222' &&
+              has(c.securityContext) && has(c.securityContext.privileged) && !c.securityContext.privileged &&
+              has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation &&
+              has(c.securityContext.capabilities) && c.securityContext.capabilities.drop == ['ALL'] &&
+              (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0) &&
+              has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+              size(c.volumeMounts) == (variables.repositoryPath == '' ? 2 : 3) &&
+              (variables.repositoryPath == '' || c.volumeMounts.exists(m, m.name == 'repository' &&
+                m.mountPath == variables.repositoryPath && has(m.subPath) && m.subPath == variables.repositoryPath.substring(size('/shared/'))))) ||
+            (c.name == 'docker' &&
+              c.image == 'registry.example.invalid/docker-dind@sha256:3333333333333333333333333333333333333333333333333333333333333333' &&
+              has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged &&
+              has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0 &&
+              has(c.securityContext.runAsNonRoot) && !c.securityContext.runAsNonRoot &&
+              !has(c.ports) && !has(c.env) && !has(c.envFrom) && !has(c.lifecycle) && !has(c.workingDir) &&
+              !has(c.livenessProbe) && !has(c.startupProbe) &&
+              has(c.readinessProbe) && has(c.readinessProbe.exec) &&
+              c.readinessProbe.exec.command == ['docker', '--host', 'unix:///run/paseo-docker/docker.sock', 'version', '--format', '{{.Server.Version}}'] &&
+              c.command == ['dockerd-entrypoint.sh'] &&
+              c.args == ['dockerd', '--host=unix:///run/paseo-docker/docker.sock', '--group=0'] &&
+              size(c.volumeMounts) == 4 &&
+              c.volumeMounts.exists(m, m.name == 'docker-state' && m.mountPath == '/var/lib/docker' && has(m.subPath) && m.subPath == 'docker') &&
+              c.volumeMounts.exists(m, m.name == 'docker-state' && m.mountPath == '/var/lib/containerd' && has(m.subPath) && m.subPath == 'containerd'))))
+        )
+      message: "The Docker guest admits only its pinned controller deployment and Docker sandbox pod shape."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: paseo-docker-guest
+spec:
+  policyName: paseo-docker-guest
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: paseo-docker-guest

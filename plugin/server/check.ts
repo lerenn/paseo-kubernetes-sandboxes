@@ -48,7 +48,7 @@ export async function checkController(c: Connection, api: Api): Promise<{ checks
       add("reach", "Endpoint reachable", "ok", "The Gateway answered over verified HTTPS.");
       try {
         known = await api.profiles(c);
-        add("auth", "Token accepted", "ok", `The token may use ${known.length} profile${known.length === 1 ? "" : "s"}.`);
+        add("auth", "Token accepted", "ok", `Discovered ${known.length} authorized profile${known.length === 1 ? "" : "s"}. Launch readiness requires separate Kubernetes storage, RBAC and admission checks.`);
       } catch (e) {
         add("auth", "Token accepted", "fail", e instanceof ControllerError && e.status === 401 ? "The endpoint rejected the token." : "The endpoint did not return authorized profiles.");
       }
