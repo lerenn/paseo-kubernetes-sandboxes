@@ -1,0 +1,60 @@
+{{- if eq .Values.installation.role "backend" }}
+{{- $profiles := .Values.profiles }}
+{{- if kindIs "map" .Values.controller.profiles }}
+{{- $profiles = .Values.controller.profiles }}
+{{- end }}
+{{- range $profileName, $profile := $profiles }}
+{{- if hasKey $profile "warmPoolCount" }}
+{{- $count := toJson $profile.warmPoolCount }}
+{{- if or (not (regexMatch "^(0|[1-9][0-9]{0,9})$" $count)) (gt (int64 $count) 2147483647) }}
+{{- fail (printf "Profile %s warmPoolCount must be an integer between 0 and 2147483647." $profileName) }}
+{{- end }}
+{{- if ne $count "0" }}
+{{- $identity := printf "%s/%s" $.Release.Name $profileName }}
+{{- $name := printf "%s-warm-%s" ($.Release.Name | trunc 40 | trimSuffix "-") ($identity | sha256sum | trunc 16) }}
+{{- $pod := default dict $profile.podSpec }}
+{{- $container := default dict $profile.container }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  annotations:
+    paseo.dev/profile: {{ $profileName | quote }}
+spec:
+  replicas: {{ $count }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 1
+      {{- with pick $pod "nodeName" "nodeSelector" "affinity" "tolerations" "topologySpreadConstraints" "runtimeClassName" "schedulerName" "imagePullSecrets" }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: warm
+          image: {{ required (printf "Profile %s requires an image." $profileName) $profile.image | quote }}
+          {{- with $container.imagePullPolicy }}
+          imagePullPolicy: {{ . | quote }}
+          {{- end }}
+          command: ["sh", "-c", "while :; do sleep 3600 & wait $!; done"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

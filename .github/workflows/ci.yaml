@@ -94,6 +94,7 @@ jobs:
           if grep -Eq 'secretName: "legacy-serving"|cpu: 123m' "$RUNNER_TEMP/override-render.yaml"; then
             exit 1
           fi
+          bash .github/scripts/check-warm-pool.sh "$RUNNER_TEMP/standard-values.yaml"
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
       - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
   docker-guest-admission:

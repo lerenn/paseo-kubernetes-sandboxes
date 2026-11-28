@@ -47,6 +47,8 @@ releases:
             claimName: paseo-repositories
             basePath: /srv/paseo/repos
           idleMinutes: 120
+          # Optional standby replicas for the main image. Omit or use 0 to disable.
+          warmPoolCount: 0
           container:
             resources:
               requests:
