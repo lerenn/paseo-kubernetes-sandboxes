@@ -96,6 +96,27 @@ jobs:
           fi
           bash .github/scripts/check-warm-pool.sh "$RUNNER_TEMP/standard-values.yaml"
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
+      - name: Render and validate opt-in shared home for both backend profiles
+        run: |
+          for profile in standard docker; do
+            helm template "$profile" charts/paseo-sandbox-controller -f "$RUNNER_TEMP/$profile-values.yaml" \
+              --set "controller.profiles.$profile.worktree.pathDepth=1" \
+              --set "controller.profiles.$profile.warmPoolCount=1" \
+              --set-json "controller.profiles.$profile.sharedHome={\"claimName\":\"paseo-home\",\"mounts\":[{\"subPath\":\".codex/auth.json\",\"mountPath\":\"/home/paseo/.codex/auth.json\",\"access\":\"ro\"}]}" \
+              > "$RUNNER_TEMP/$profile-home.yaml"
+            yq -e 'select(.kind == "Deployment" and .metadata.annotations."paseo.dev/profile") |
+              .spec.template.spec | (.volumes == null and .containers[0].volumeMounts == null)' \
+              "$RUNNER_TEMP/$profile-home.yaml" | grep -qx true
+            yq -r 'select(.kind == "ConfigMap") | .data."config.json"' "$RUNNER_TEMP/$profile-home.yaml" |
+              node --input-type=module -e '
+                import assert from "node:assert/strict";
+                import { readFileSync } from "node:fs";
+                import { createPolicy } from "./controller/policy.mjs";
+                const profile = process.argv[1];
+                const policy = createPolicy(JSON.parse(readFileSync(0, "utf8")));
+                assert.equal(policy.profileFor("paseo-daemon", profile).sharedHome.mounts[0].access, "ro");
+              ' "$profile"
+          done
       - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
   docker-guest-admission:
     runs-on: ubuntu-latest

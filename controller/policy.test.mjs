@@ -76,3 +76,41 @@ test("controller rejects legacy bearer tokens without explicit migration mode", 
   assert.equal(policy.authenticateDirect("Bearer " + token), null);
   assert.equal(policy.authenticateGateway({ authorized: false }, "daemon"), null);
 });
+
+test("shared home requires explicit, isolated per-profile mounts", () => {
+  const mount = { subPath: ".codex/auth.json", mountPath: "/home/paseo/.codex/auth.json", access: "ro" };
+  const sharedHome = { claimName: "home", mounts: [mount] };
+  const worktree = { ...profile.worktree, claimName: "home", subPath: ".paseo/worktrees", pathDepth: 2 };
+  const optedIn = { ...profile, worktree, sharedHome };
+  const policyFor = (spec) => createPolicy({ ...config, profiles: { default: spec } });
+  assert.equal(policyFor(optedIn).profileFor("daemon", "default"), optedIn);
+  assert.equal(volumeSubPath(worktree, "/worktrees/project/slug"), ".paseo/worktrees/project/slug");
+  for (const root of ["/worktrees/project", "/worktrees/project/slug/child"]) {
+    assert.throws(() => volumeSubPath(worktree, root), /configured depth/);
+  }
+  for (const change of [
+    { subPath: "" }, { subPath: "." }, { subPath: "../auth" }, { subPath: "config/../auth" },
+    { subPath: "/auth" }, { subPath: ".paseo/config.json" }, { subPath: ".codex" }, { subPath: ".paseo" },
+    { mountPath: "/home/paseo" }, { mountPath: "/home/paseo/../auth" },
+    { mountPath: "/home/paseo/.paseo/db" }, { mountPath: "/home/paseo/.claude" },
+    { mountPath: "/run/paseo-docker" }, { access: undefined }, { access: "readwrite" },
+    { subPathExpr: "$(AUTH)" },
+  ]) {
+    assert.throws(() => policyFor({ ...optedIn, sharedHome: { ...sharedHome, mounts: [{ ...mount, ...change }] } }),
+      /Shared home mounts require/);
+  }
+  assert.throws(() => policyFor({ ...optedIn, worktree: profile.worktree }), /pathDepth/);
+  assert.throws(() => policyFor({ ...optedIn, repository: { ...worktree, subPath: ".codex" } }), /separate from/);
+  assert.throws(() => policyFor({
+    ...optedIn, podSpec: { volumes: [{ name: "bypass", persistentVolumeClaim: { claimName: "home" } }] },
+  }), /controller-managed volume/);
+  assert.throws(() => policyFor({
+    ...optedIn, sidecars: [{ volumeMounts: [{ name: "shared-home", mountPath: "/bypass" }] }],
+  }), /main container/);
+  assert.throws(() => policyFor({
+    ...optedIn, container: { volumeMounts: [{ name: "other", mountPath: "/home/paseo/.codex" }] },
+  }), /destinations must be disjoint/);
+  assert.throws(() => policyFor({
+    ...optedIn, sharedHome: { ...sharedHome, mounts: [mount, { ...mount, mountPath: "/home/paseo/alias", access: "rw" }] },
+  }), /sources must be disjoint/);
+});

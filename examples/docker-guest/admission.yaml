@@ -17,6 +17,11 @@ spec:
       expression: object.spec
     - name: controller
       expression: "'paseo-docker-sandbox-controller'"
+    - name: sharedHomeClaim
+      expression: "'paseo-home'"
+    - name: sharedHomeMounts
+      # Opt in with a map keyed by exact mountPath, with [subPath, access] pairs.
+      expression: "{}"
     - name: workspacePath
       expression: "('paseo.dev/worktree' in object.metadata.annotations) ? object.metadata.annotations['paseo.dev/worktree'] : ''"
     - name: repositoryPath
@@ -94,10 +99,13 @@ spec:
           variables.pod.restartPolicy == 'Never' &&
           variables.workspaceMount &&
           (variables.repositoryPath == '' || variables.repositoryMount) &&
-          size(variables.pod.volumes) == (variables.repositoryPath == '' ? 3 : 4) &&
+          size(variables.pod.volumes) == (variables.repositoryPath == '' ? 3 : 4) +
+            (size(variables.sharedHomeMounts) == 0 ? 0 : 1) &&
           variables.pod.volumes.all(v,
             (v.name == 'worktree' && has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'docker-worktrees') ||
             (v.name == 'repository' && variables.repositoryMount && has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'docker-repositories') ||
+            (v.name == 'shared-home' && size(variables.sharedHomeMounts) > 0 &&
+              has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == variables.sharedHomeClaim) ||
             (v.name == 'docker-socket' && has(v.emptyDir) && (!has(v.emptyDir.medium) || v.emptyDir.medium == '')) ||
             (v.name == 'docker-state' && has(v.emptyDir) && (!has(v.emptyDir.medium) || v.emptyDir.medium == '') &&
               has(v.emptyDir.sizeLimit) && quantity(v.emptyDir.sizeLimit).compareTo(quantity('10Gi')) == 0)) &&
@@ -116,7 +124,12 @@ spec:
               has(c.securityContext.capabilities) && c.securityContext.capabilities.drop == ['ALL'] &&
               (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0) &&
               has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type == 'RuntimeDefault' &&
-              size(c.volumeMounts) == (variables.repositoryPath == '' ? 2 : 3) &&
+              size(c.volumeMounts) == (variables.repositoryPath == '' ? 2 : 3) + size(variables.sharedHomeMounts) &&
+              c.volumeMounts.filter(m, m.name == 'shared-home').size() == size(variables.sharedHomeMounts) &&
+              c.volumeMounts.all(m, m.name != 'shared-home' ||
+                (m.mountPath in variables.sharedHomeMounts && has(m.subPath) &&
+                 m.subPath == variables.sharedHomeMounts[m.mountPath][0] &&
+                 (has(m.readOnly) && m.readOnly) == (variables.sharedHomeMounts[m.mountPath][1] == 'ro'))) &&
               (variables.repositoryPath == '' || c.volumeMounts.exists(m, m.name == 'repository' &&
                 m.mountPath == variables.repositoryPath && has(m.subPath) && m.subPath == variables.repositoryPath.substring(size('/shared/'))))) ||
             (c.name == 'docker' &&

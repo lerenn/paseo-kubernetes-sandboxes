@@ -2,8 +2,11 @@
 // The test installs admission policy and RBAC. Every Pod request is a dry-run.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { buildPod } from "../../controller/pod.mjs";
+import { createPolicy } from "../../controller/policy.mjs";
 
 const [kubeconfig] = process.argv.slice(2);
 if (!kubeconfig) throw new Error("Pass the kubeconfig for a disposable Kubernetes cluster.");
@@ -34,7 +37,7 @@ const profile = {
   docker: { enabled: true, image: image("docker-dind", "3"), sizeLimit: "10Gi" },
   podSpec: { serviceAccountName: "default" },
 };
-const pod = (gitDir) => buildPod("sbx-" + "0".repeat(32), "testing", "docker", profile,
+const pod = (gitDir, spec = profile) => buildPod("sbx-" + "0".repeat(32), "testing", "docker", spec,
   { root: "/shared/worktrees/example", gitDir },
   { apiVersion: "v1", kind: "Service", name: controller, uid: "00000000-0000-4000-a000-000000000000" });
 const controllerPod = {
@@ -123,4 +126,47 @@ for (const change of [
 const typeChecking = JSON.parse(kubectl(["get", "validatingadmissionpolicy", "paseo-docker-guest", "-o", "json"]));
 // Standalone API servers may omit policy status when the controller manager is absent.
 assert.deepEqual(typeChecking.status?.typeChecking?.expressionWarnings ?? [], []);
+
+const sharedHome = {
+  claimName: "paseo-home",
+  mounts: [
+    { subPath: ".codex/auth.json", mountPath: "/home/paseo/.codex/auth.json", access: "ro" },
+    { subPath: "provider-fixtures/cache", mountPath: "/home/paseo/.claude/cache", access: "rw" },
+  ],
+};
+const optedIn = { ...profile, worktree: { ...profile.worktree, pathDepth: 1 }, sharedHome };
+const policy = createPolicy({
+  profiles: { docker: optedIn },
+  principals: { testing: { gatewayIdentity: "gateway.test", profiles: ["docker"] } },
+});
+const withHome = () => pod("/shared/repositories/example/.git", policy.profileFor("testing", "docker"));
+dryRun(withHome(), { denied: policyDenial });
+const exactMounts = Object.fromEntries(sharedHome.mounts.map(({ mountPath, subPath, access }) => [mountPath, [subPath, access]]));
+const admission = readFileSync(new URL("./admission.yaml", import.meta.url), "utf8")
+  .replace('expression: "{}"', "expression: " + JSON.stringify(JSON.stringify(exactMounts)));
+kubectl(["apply", "-f", "-"], { input: admission });
+// A successful apply can return before the admission evaluator sees the update.
+const admissionDeadline = Date.now() + 10_000;
+for (;;) {
+  try {
+    dryRun(withHome());
+    break;
+  } catch (error) {
+    if (!policyDenial.test(error.message) || Date.now() >= admissionDeadline) throw error;
+    await setTimeout(250);
+  }
+}
+for (const change of [
+  (p) => delete p.spec.containers[0].volumeMounts.find((m) => m.name === "shared-home").subPath,
+  (p) => p.spec.containers[0].volumeMounts.find((m) => m.name === "shared-home").readOnly = false,
+  (p) => p.spec.containers[0].volumeMounts.find((m) => m.name === "shared-home").mountPath = "/home/paseo",
+  (p) => p.spec.volumes.find((v) => v.name === "shared-home").persistentVolumeClaim.claimName = "other",
+  (p) => p.spec.containers[1].volumeMounts.push(p.spec.containers[0].volumeMounts.find((m) => m.name === "shared-home")),
+]) {
+  const changed = withHome();
+  change(changed);
+  dryRun(changed, { denied: policyDenial });
+}
+const standardWithHome = pod(undefined, { ...optedIn, docker: undefined });
+dryRun(standardWithHome, { namespace: standard });
 console.log("Docker guest allowed and denied admission cases passed with server-side dry-run.");

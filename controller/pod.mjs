@@ -1,4 +1,4 @@
-import { profileRevision, volumeSubPath } from "./policy.mjs";
+import { profileRevision, sharedHomeVolume, volumeSubPath } from "./policy.mjs";
 
 export const managedBy = "paseo-sandbox-controller";
 export const label = {
@@ -66,6 +66,13 @@ export function buildPod(name, principal, profileName, profile, { root, gitDir }
       throw new Error("Expected a separate Git metadata directory ending in /.git.");
     }
     mount("repository", profile.repository, gitDir);
+  }
+  if (profile.sharedHome) {
+    const { claimName, mounts } = profile.sharedHome;
+    volumes.push({ name: sharedHomeVolume, persistentVolumeClaim: { claimName } });
+    for (const { mountPath, subPath, access } of mounts) {
+      volumeMounts.push({ name: sharedHomeVolume, mountPath, subPath, readOnly: access === "ro" });
+    }
   }
   const main = restrictedContainer({
     ...profile.container,
