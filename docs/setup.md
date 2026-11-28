@@ -30,6 +30,74 @@ For lab deployments, use a dedicated Docker controller and namespace with separa
 
 Each controller accepts only its configured principals and profiles, scopes pod operations to its release, principal and workspace ID, and checks worktree and repository paths against profile mappings. The chart Role operates within its namespace. The dedicated controller needs the chart's existing namespace permissions. Test the lab policy against both the intended pod and rejected pod specs before enabling Docker workspaces.
 
+The [optional guest admission example](../examples/docker-guest/README.md)
+limits the dedicated namespace to the pinned controller and Docker Pod shape.
+Helm leaves namespace Pod Security labels and admission resources under
+administrator control.
+
+### Launch preflight
+
+Controller and Gateway probes report listener health. Authenticated
+`GET /v1/gateway/profiles` confirms routing and profile grants. Run the
+following checks separately before enabling a profile for workspace launches.
+
+1. As a cluster operator, inspect every existing claim referenced by the
+   profile in the backend namespace. Verify the `Bound` phase, the expected
+   volume and access mode, and that its backing directories match the daemon's
+   worktree and Git roots. For example, one RWX claim can hold both mappings.
+
+   ```yaml
+   worktree:
+     claimName: workspace-data
+     basePath: /srv/paseo/worktrees
+     subPath: worktrees
+   repository:
+     claimName: workspace-data
+     basePath: /srv/paseo/repos
+     subPath: repos
+   ```
+
+   ```sh
+   kubectl -n "$BACKEND_NAMESPACE" get pvc workspace-data -o wide
+   ```
+
+2. Using an operator identity authorized to impersonate the controller
+   ServiceAccount, check the existing chart permissions.
+
+   ```sh
+   CONTROLLER_ID="system:serviceaccount:${BACKEND_NAMESPACE}:${CONTROLLER_SERVICE_ACCOUNT}"
+   for verb in get list create delete; do
+     kubectl -n "$BACKEND_NAMESPACE" --as "$CONTROLLER_ID" auth can-i "$verb" pods
+   done
+   for verb in get create; do
+     kubectl -n "$BACKEND_NAMESPACE" --as "$CONTROLLER_ID" auth can-i "$verb" pods --subresource=exec
+   done
+   ```
+
+3. Prepare a manifest matching the release's generated Pod, including its
+   identity labels, owner reference, image digests, volumes and workspace
+   paths. Use an unused sandbox name. Include the Git mount in the main
+   container for a linked worktree. For Docker, prepare a second manifest
+   with a disallowed claim or image. The intended request must be accepted
+   and the changed request must be rejected by admission.
+
+   ```sh
+   kubectl -n "$BACKEND_NAMESPACE" --as "$CONTROLLER_ID" create --dry-run=server -f intended-pod.yaml
+   kubectl -n "$BACKEND_NAMESPACE" --as "$CONTROLLER_ID" create --dry-run=server -f denied-pod.yaml
+   ```
+
+4. Ask the host operator to repeat admission verification for the translated
+   Pod when a virtual cluster syncs it to a host cluster. Server-side dry-run
+   checks authorization and admission. Claim inspection and storage
+   verification cover separate dependencies. Runtime startup also depends
+   on scheduling, image pulls, and successful mounts.
+
+Operators use their own credentials for claim inspection and impersonation.
+The chart's existing permissions cover the controller's lifecycle operations.
+Paseo displays the controller's permission or Pod rejection guidance during
+launch. Administrators can use their cluster's audit records for exact
+policy and identity details.
+
 ### Install Gateway and backends
 
 1. Prepare shared storage in the backend namespaces and a dedicated, retained ReadWriteOncePod PVC in the Gateway namespace. Create the external Gateway serving TLS Secret for the hostname the daemon uses. A private route such as TLS passthrough must preserve bidirectional HTTP/2 and allow long-lived streams.
@@ -46,10 +114,10 @@ Each controller accepts only its configured principals and profiles, scopes pod 
 5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.3/paseo-sandbox-controller-0.6.3.tgz
-   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.3 -n paseo --wait
-   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.3 -n standard --wait
-   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.3 -n docker --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.4/paseo-sandbox-controller-0.6.4.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.4 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.4 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.4 -n docker --wait
    ```
 
    For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
@@ -80,7 +148,7 @@ Set `gateway.backends.<id>.clusterDisplayName` in the shared installation values
 
 ## Paseo user setup
 
-1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.3`.
+1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.4`.
 2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
 3. In **New workspace**, choose the host and open **Execution**. Select **Local** where permitted, or choose a Gateway profile from the selected host. Choose **Docker** explicitly for workspaces that need its privileged container. The selected profile applies before setup or the first agent starts.
 4. To route an existing workspace, open **Kubernetes Sandbox → Workspaces** and save a profile. If the first agent failed, return to the same workspace draft and retry after the profile is saved. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.

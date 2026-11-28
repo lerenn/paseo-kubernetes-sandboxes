@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { migrateSettings, settingsSchema } from "../shared/settings.js";
 import { executionKey, withWorkspaceExecution } from "../shared/execution.js";
+import { ControllerError } from "./controller.js";
 import { wrapFor, type HookDeps } from "./hooks.js";
 
 const legacy = {
@@ -46,6 +47,14 @@ test("the wrap uses shared paths and forwards only environment names", async () 
 test("an opted-in launch fails closed on controller or repository errors", async () => {
   await assert.rejects(wrapFor({ ...deps, ensure: async () => { throw new Error("unavailable"); } }, launch), /could not start the sandbox/);
   await assert.rejects(wrapFor({ ...deps, repo: async () => { throw new Error("bad .git"); } }, launch), /could not read the workspace repository/);
+});
+
+test("launch shows sanitized Gateway admission guidance", async () => {
+  const message = "Kubernetes rejected the sandbox pod request.";
+  await assert.rejects(wrapFor({
+    ...deps,
+    ensure: async () => { throw new ControllerError(403, message); },
+  }, launch), { message: `Kubernetes Sandbox could not start the sandbox: ${message}` });
 });
 
 test("teardown reuses a ready sandbox without creating one", async () => {

@@ -24,7 +24,7 @@ async function listen(server) {
   return `https://127.0.0.1:${server.address().port}`;
 }
 
-async function fixture(t, { commandFixture = false } = {}) {
+async function fixture(t, { commandFixture = false, launchFailure } = {}) {
   const state = mkdtempSync(join(tmpdir(), "paseo-gateway-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   const openssl = (...args) => execFileSync("openssl", args, { cwd: state, stdio: "ignore" });
@@ -79,6 +79,7 @@ async function fixture(t, { commandFixture = false } = {}) {
         const body = JSON.parse(Buffer.concat(chunks));
         assert.equal(body.profile, "shared");
         assert.equal(body.privileged, privileged);
+        if (launchFailure) return reply(launchFailure.status, { error: launchFailure.error });
         sandboxes.set(key, { profile: "shared", phase: "Running", ready: true, deleting: false });
       }
       if (req.method === "DELETE") sandboxes.delete(key);
@@ -195,6 +196,13 @@ test("gateway filters discovery and routes colliding backend profile IDs with du
   assert.equal((await call("DELETE", another, "B"))[0], 403);
   assert.equal((await call("PUT", another, "B", { profile: "standard" }))[0], 403);
   assert.equal(accesses.length, count);
+});
+
+test("gateway relays a controller admission denial after successful discovery", { timeout: 10000 }, async (t) => {
+  const launchFailure = { status: 403, error: "Kubernetes rejected the sandbox pod request." };
+  const { call } = await fixture(t, { launchFailure });
+  assert.ok((await call("GET", "/v1/profiles", "B"))[1].profiles.some(({ id }) => id === "docker"));
+  assert.deepEqual(await call("PUT", path, "B", { profile: "docker" }), [403, { error: launchFailure.error }]);
 });
 
 test("gateway preserves HTTP/2 input, output, resize bytes, half-close, and cancellation", { timeout: 10000 }, async (t) => {

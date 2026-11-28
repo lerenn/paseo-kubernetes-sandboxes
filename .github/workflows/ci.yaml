@@ -96,6 +96,20 @@ jobs:
           fi
           helm package charts/paseo-sandbox-controller --destination "$RUNNER_TEMP"
       - run: docker build -f controller/Dockerfile -t paseo-sandbox-controller:ci .
+  docker-guest-admission:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25', cache: false}
+      - run: go install sigs.k8s.io/kind@v0.31.0
+      - name: Verify Docker guest admission on Kubernetes
+        run: |
+          kind create cluster --image kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a \
+            --kubeconfig "$RUNNER_TEMP/docker-admission.kubeconfig" --wait 90s
+          node examples/docker-guest/test.mjs "$RUNNER_TEMP/docker-admission.kubeconfig"
   version:
     runs-on: ubuntu-latest
     steps:

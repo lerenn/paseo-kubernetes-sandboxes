@@ -17,10 +17,34 @@ export function inCluster() {
 }
 
 export class KubernetesError extends Error {
-  constructor(method, status) {
+  constructor(method, status, authorizationDenied = false) {
     super(`Kubernetes ${method} request failed (HTTP ${status}).`);
     this.status = status;
+    this.authorizationDenied = authorizationDenied;
   }
+}
+
+// Kubernetes reports both authorization and admission denials as HTTP 403.
+export function isAuthorizationDenial(body) {
+  try {
+    const { kind, reason, message } = JSON.parse(body);
+    return kind === "Status" && reason === "Forbidden" && typeof message === "string" &&
+      /: User "[^"]+" cannot (?:get|create|delete) resource "pods" in API group "" in the namespace "[^"]+"(?:$|:)/.test(message);
+  } catch {
+    return false;
+  }
+}
+
+export function sandboxOperationError(error) {
+  if (error instanceof KubernetesError) {
+    if (error.authorizationDenied) {
+      return { status: 403, error: "The controller lacks Kubernetes permission to manage sandbox pods. Ask the cluster administrator to check its Role and RoleBinding." };
+    }
+    if (error.status === 403 || error.status === 422) {
+      return { status: error.status, error: "Kubernetes rejected the sandbox pod request. Ask the cluster administrator to check admission policy, the pod configuration and controller permissions." };
+    }
+  }
+  return { status: 503, error: "Sandbox operation failed. Check controller permissions and cluster availability." };
 }
 
 export function kubeClient({ namespace, connection }) {
@@ -38,6 +62,18 @@ export function kubeClient({ namespace, connection }) {
           ...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
         },
       }, (res) => {
+        if (res.statusCode === 403) {
+          const chunks = [];
+          let size = 0;
+          res.on("data", (chunk) => {
+            size += chunk.length;
+            if (size <= 16_384) chunks.push(chunk);
+          });
+          res.on("error", reject);
+          res.on("end", () => reject(new KubernetesError(method, 403,
+            size <= 16_384 && isAuthorizationDenial(Buffer.concat(chunks).toString("utf8")))));
+          return;
+        }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
           return reject(new KubernetesError(method, res.statusCode));

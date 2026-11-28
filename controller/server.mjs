@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createSecureServer } from "node:http2";
 import { kubeOpener, serveExec } from "./exec.mjs";
-import { inCluster, kubeClient, KubernetesError } from "./kubernetes.mjs";
+import { inCluster, kubeClient, KubernetesError, sandboxOperationError } from "./kubernetes.mjs";
 import { createPolicy, profileRevision, sandboxName } from "./policy.mjs";
 import { readTLS, reloadTLS } from "./tls.mjs";
 import { buildPod, label, managedBy } from "./pod.mjs";
@@ -194,7 +194,8 @@ const server = createSecureServer({ ...tlsOptions(), allowHTTP1: true }, async (
     });
   } catch (error) {
     console.error(error.message);
-    return send(response, 503, { error: "Sandbox operation failed. Check controller permissions and cluster availability." });
+    const failure = sandboxOperationError(error);
+    return send(response, failure.status, { error: failure.error });
   }
 });
 reloadTLS(server, tlsOptions);
