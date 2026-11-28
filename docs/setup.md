@@ -22,6 +22,47 @@ Ephemeral storage covers local pod storage usage such as writable layers, logs a
 
 Treat each profile's storage roots as authorization boundaries. A token holder may request worktrees and repository metadata anywhere below the roots of its permitted profiles. Use separate storage roots for mutually untrusted daemons. Tokens partition pod operations by principal. The shared checkout and common Git directory remain writable from both the daemon and pod. Use dedicated credentials inside sandbox images or administrator-managed mounts where Git or package registries require them. Forwarded command environment values and arguments are present in Kubernetes exec requests and can appear in API audit logs.
 
+### Optional shared daemon home
+
+The daemon can mount a ReadWriteMany NFS claim at `/home/paseo`. Workspace pods can use individual provider files from the same export. Enable this per authorized backend profile under `controller.profiles.<id>`, in both Standard and Docker releases where needed. The workspace image must run the harness as a user with `HOME=/home/paseo` and matching UID/GID access. The claim must exist in each backend namespace that references it.
+
+```yaml
+worktree:
+  claimName: paseo-home
+  basePath: /home/paseo/.paseo/worktrees
+  subPath: .paseo/worktrees
+  pathDepth: 2                       # project ID / worktree slug
+sharedHome:
+  claimName: paseo-home
+  mounts:
+    - subPath: .codex/auth.json
+      mountPath: /home/paseo/.codex/auth.json
+      access: ro
+    - subPath: .codex/config.toml
+      mountPath: /home/paseo/.codex/config.toml
+      access: ro
+    - subPath: .claude/.credentials.json
+      mountPath: /home/paseo/.claude/.credentials.json
+      access: ro
+    - subPath: .claude/settings.json
+      mountPath: /home/paseo/.claude/settings.json
+      access: ro
+```
+
+This example assumes file-backed provider login and a claim rooted at the daemon home. Use only the entries the installed harnesses require. Codex reads `config.toml` and, with file-backed login, `auth.json` under `CODEX_HOME` (default `~/.codex`). Claude Code uses `~/.claude/settings.json` and can use `~/.claude/.credentials.json` for file-backed login on Linux. Check the pinned build's effective `CLAUDE_CONFIG_DIR`, the location and need for its separate global `.claude.json`, and which files the build needs to write. Prefer keeping mutable Claude global state local to the pod. Adjust each source and destination and set the harness environment where your deployment uses custom paths. Keychain-backed logins require separate authentication configuration.
+
+Prepare the exact source files and directories, with their correct types, before enabling the profile. Use `access: ro` for private configuration and pre-provisioned credential files. Use `access: rw` only for a reviewed path that requires writes, such as a dedicated provider-only directory that contains no other daemon or harness state. A file mounted with `subPath` remains bound to its original inode when the source is atomically replaced. Recreate the sandbox to pick up the replacement. Harnesses that need to rename files or write refreshed tokens need a separately reviewed writable directory layout. Coordinate refresh with a single writer during maintenance.
+
+The controller limits these mounts to the main workspace container. The managed Docker sidecar receives the workspace worktree and its existing Docker mounts. Keep the Docker profile restricted to trusted workspaces with access to its privileged daemon. Leave `sharedHome` unset to retain the existing pod spec. Use a narrow worktree base and match `pathDepth` to your leaf layout. Keep any linked-Git mapping under its own reviewed root. Check every PVC and export mapping for aliases to protected data. Keep daemon configuration, session DB and side files, service credentials and other worktrees outside the selected sources. Review sources for symlinks, hard links and nested exports back to protected data, and keep selected provider files and their parents under trusted ownership.
+
+#### Migrate an existing daemon home
+
+1. In Lab's reviewed IaC, provision a private RWX export and stage an isolated copy target. Record the current daemon image, UID/GID, environment, volume and mount paths, and snapshot the existing home. Inventory source and destination metadata for mount selections without logging credential contents.
+2. As a storage operator, seed the entire home into the staged target, including hidden files, preserving numeric ownership, modes, timestamps, symlinks, hard links, ACLs and extended attributes. For rsync, use `-aHAX --numeric-ids` with source and destination directory trailing slashes. Validate that the chosen NFS server and copy identity can preserve the metadata despite root squash. Investigate any preservation failures before cutover.
+3. Pause launches, drain sandboxes and stop the daemon and other writers. Take a consistent backup, then repeat the sync while the source is quiesced. Reconcile reviewed deletions on the dedicated target and check for a clean verification pass without printing file contents. Keep the original volume and snapshot for rollback.
+4. Mount the target at the same daemon home path and start the daemon with selected workspace mounts still disabled. Keep launches paused. Validate ownership and access as the production UID/GID, daemon startup and session inventory, and the worktree and linked Git paths. Check effective harness paths and file types without dumping credentials. Check the exact workspace Pod and negative cases with [launch preflight](#launch-preflight), including guest and translated host admission where applicable. Verify that the profile allowlists grant only the intended daemons, and that any image warmers remain storage-free.
+5. After Lab reviews the results, enable the selected mounts and reopen existing sandboxes as approved. If validation fails, pause writers and remove the mount opt-in, then restore the previous daemon volume and settings. If the new volume accepted writes, snapshot it and reconcile them with the previous volume while both sides are quiesced before restoring service.
+
 ### Optional Docker profile for trusted workspaces
 
 Define a separate profile with `docker.enabled: true` and a Docker-in-Docker image in `docker.image`. The main image needs the Docker CLI. The chart example includes the optional settings. Include the Docker profile in only the principal allowlists that need it. Paseo displays **Docker (privileged)** and requires a user to select it.
@@ -118,10 +159,10 @@ policy and identity details.
 5. From the release checkout, install each release with [the Helm helper](../scripts/helm-installation), which uses Mike Farah yq v4 to pass only the selected settings to Helm. The Gateway bootstraps the issuer before the controllers request their serving certificates. Keep release names and backend IDs stable.
 
    ```sh
-   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.5/paseo-sandbox-controller-0.6.5.tgz
-   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.5 -n paseo --wait
-   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.5 -n standard --wait
-   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.5 -n docker --wait
+   chart=https://github.com/lerenn/paseo-kubernetes-sandboxes/releases/download/v0.6.6/paseo-sandbox-controller-0.6.6.tgz
+   scripts/helm-installation values.yaml gateway upgrade --install gateway "$chart" --version 0.6.6 -n paseo --wait
+   scripts/helm-installation values.yaml standard upgrade --install standard "$chart" --version 0.6.6 -n standard --wait
+   scripts/helm-installation values.yaml docker upgrade --install docker "$chart" --version 0.6.6 -n docker --wait
    ```
 
    For Argo or other GitOps renderers, run `scripts/helm-installation values.yaml <component>` to emit that component’s normal Helm values. Existing per-release Helm overrides still work. Backend values use `controller.profiles`, `controller.principals`, `controller.resources` and `controller.tlsSecretName`. The corresponding legacy root keys are fallback inputs. When you supply a controller map, it takes precedence over the whole legacy map.
@@ -152,7 +193,7 @@ Set `gateway.backends.<id>.clusterDisplayName` in the shared installation values
 
 ## Paseo user setup
 
-1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.5`.
+1. Install on the daemon running Paseo 0.18.0 or later and Node.js 22 or later with `paseo plugin install git:lerenn/paseo-kubernetes-sandboxes:plugin --ref v0.6.6`.
 2. Open **Kubernetes Sandbox → Gateway → Set up Gateway**. Enter the administrator's HTTPS URL and absolute token file path as seen from the daemon. Enter a CA file path if the Gateway uses a private CA. Select **Check connection**, then **Save Gateway**.
 3. In **New workspace**, choose the host and open **Execution**. Select **Local** where permitted, or choose a Gateway profile from the selected host. Choose **Docker** explicitly for workspaces that need its privileged container. The selected profile applies before setup or the first agent starts.
 4. To route an existing workspace, open **Kubernetes Sandbox → Workspaces** and save a profile. If the first agent failed, return to the same workspace draft and retry after the profile is saved. **Refresh status** shows the pod state. To change profiles, stop the sandbox and wait for **No sandbox**. A stop ends running sessions and discards ephemeral state. Shared files remain on the volume. Reopen agents and terminals to use the new route.

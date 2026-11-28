@@ -58,6 +58,14 @@ standalone and linked Docker worktrees, and ordinary pods. It also checks
 denials for an alternate identity, unpinned image, wrong claim, wrong mount,
 additional sidecar, and a Docker Pod in the Standard namespace.
 
+For a profile using [selective shared home](../../docs/setup.md#optional-shared-daemon-home),
+set the CEL variable `sharedHomeClaim` to the approved claim and replace the
+empty `sharedHomeMounts` map with the approved mount paths mapped to exact
+`[subPath, access]` pairs. Update the worktree path expression to match the
+profile's depth and storage root. The test covers the opt-in policy with exact
+mounts and rejects a changed claim, access mode, whole-home target, missing
+subPath and an extra mount in the Docker sidecar.
+
 ```sh
 node examples/docker-guest/test.mjs /path/to/disposable-cluster.kubeconfig
 ```

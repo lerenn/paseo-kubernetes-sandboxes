@@ -15,17 +15,75 @@ export function volumeSubPath(volume, path) {
   if (!relative || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
     throw new Error("Workspace path must be inside its configured volume base path.");
   }
+  if (volume.pathDepth !== undefined && relative.split("/").length !== volume.pathDepth) {
+    throw new Error("Workspace path must have the configured depth below its volume base path.");
+  }
   return posix.join(volume.subPath ?? "", relative);
 }
+
+const relativePath = (value) => typeof value === "string" && value.length <= 4096 &&
+  !value.includes("\0") && value.split("/").every((part) => part && part !== "." && part !== "..");
+export const pathsOverlap = (a, b) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
+const home = "/home/paseo";
+const harnessRoots = [".claude", ".codex"];
+export const sharedHomeVolume = "shared-home";
 
 function validateVolume(volume) {
   if (!volume || !identifier.test(volume.claimName ?? "") || !absolutePath(volume.basePath)) {
     throw new Error("A volume requires a claim name and an absolute base path below /.");
   }
   const subPath = volume.subPath ?? "";
-  if (typeof subPath !== "string" || subPath.includes("\0") ||
-      (subPath && (posix.isAbsolute(subPath) || subPath.split("/").some((part) => !part || part === "." || part === "..")))) {
+  if (subPath !== "" && !relativePath(subPath)) {
     throw new Error("Volume subPath must be a normalized relative directory.");
+  }
+  if (volume.pathDepth !== undefined && (!Number.isSafeInteger(volume.pathDepth) || volume.pathDepth < 1)) {
+    throw new Error("Volume pathDepth must be a positive integer.");
+  }
+}
+
+function validateSharedHome(profile) {
+  const { sharedHome, worktree, repository, container, podSpec, sidecars } = profile;
+  if (!sharedHome || typeof sharedHome.claimName !== "string" || !identifier.test(sharedHome.claimName) ||
+      !Array.isArray(sharedHome.mounts) || !sharedHome.mounts.length || sharedHome.mounts.length > 32) {
+    throw new Error("Shared home requires a claim name and 1 to 32 explicit mounts.");
+  }
+  if (worktree.pathDepth === undefined) throw new Error("Shared home requires a worktree pathDepth.");
+  if (podSpec?.shareProcessNamespace) throw new Error("Shared home requires separate container process namespaces.");
+  if (podSpec?.volumes?.some((volume) => volume.name === sharedHomeVolume ||
+      volume.persistentVolumeClaim?.claimName === sharedHome.claimName)) {
+    throw new Error("Shared home must use its controller-managed volume.");
+  }
+  const containers = [container, ...(sidecars ?? []), ...(podSpec?.initContainers ?? [])];
+  if (containers.some((entry) => entry?.volumeMounts?.some(({ name }) => name === sharedHomeVolume) ||
+      entry?.volumeDevices?.some(({ name }) => name === sharedHomeVolume))) {
+    throw new Error("Shared home mounts are reserved for the workspace main container.");
+  }
+
+  const targets = (container?.volumeMounts ?? []).map(({ mountPath }) => mountPath);
+  const sources = [];
+  for (const mount of sharedHome.mounts) {
+    if (!mount || Object.keys(mount).some((key) => !["subPath", "mountPath", "access"].includes(key)) ||
+        !relativePath(mount.subPath) || !absolutePath(mount.mountPath) || !mount.mountPath.startsWith(home + "/") ||
+        !["ro", "rw"].includes(mount.access) ||
+        pathsOverlap(mount.subPath, ".paseo") || pathsOverlap(mount.mountPath, home + "/.paseo") ||
+        harnessRoots.some((path) => mount.subPath === path || mount.mountPath === home + "/" + path)) {
+      throw new Error("Shared home mounts require safe relative subPaths, destinations below /home/paseo outside .paseo, and explicit ro or rw access.");
+    }
+    if (targets.some((path) => pathsOverlap(path, mount.mountPath))) {
+      throw new Error("Shared home mount destinations must be disjoint.");
+    }
+    if (sources.some((path) => pathsOverlap(path, mount.subPath))) {
+      throw new Error("Shared home mount sources must be disjoint.");
+    }
+    targets.push(mount.mountPath);
+    sources.push(mount.subPath);
+    for (const mapping of [worktree, repository]) {
+      if (mapping && (pathsOverlap(mapping.basePath, mount.mountPath) ||
+          (mapping.claimName === sharedHome.claimName &&
+            (!mapping.subPath || pathsOverlap(mapping.subPath, mount.subPath))))) {
+        throw new Error("Shared home mounts must be separate from worktree and repository mappings.");
+      }
+    }
   }
 }
 
@@ -60,6 +118,7 @@ function validateProfile(name, profile) {
   }
   validateVolume(profile.worktree);
   if (profile.repository) validateVolume(profile.repository);
+  if (profile.sharedHome !== undefined) validateSharedHome(profile);
 }
 
 function containerResources(kind, name, resources) {

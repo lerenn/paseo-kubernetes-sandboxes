@@ -32,3 +32,34 @@ test("Docker sidecar uses the same worktree subPath and a separate disk-backed s
   assert.equal(main.volumeMounts.some(({ name }) => name === "docker-state"), false);
   assert.ok(docker.volumeMounts.some(({ name, mountPath }) => name === "docker-state" && mountPath === "/var/lib/docker"));
 });
+
+test("selective home mounts remain in main for Standard and Docker", () => {
+  const sharedHome = {
+    claimName: "shared",
+    mounts: [
+      { subPath: ".codex/auth.json", mountPath: "/home/paseo/.codex/auth.json", access: "ro" },
+      { subPath: "provider-only/claude", mountPath: "/home/paseo/.claude/cache", access: "rw" },
+    ],
+  };
+  for (const id of ["standard", "docker"]) {
+    const { spec } = build(id, {
+      ...profile,
+      sharedHome,
+      sidecars: [{ name: "extra" }],
+      podSpec: { initContainers: [{ name: "init" }] },
+      ...(id === "docker" && { docker: { enabled: true, image: "docker:dind" } }),
+    });
+    const [main, ...sidecars] = spec.containers;
+    assert.equal(spec.volumes.filter(({ name }) => name === "shared-home").length, 1);
+    assert.deepEqual(spec.volumes.find(({ name }) => name === "shared-home").persistentVolumeClaim, { claimName: "shared" });
+    assert.deepEqual(main.volumeMounts, [
+      { name: "worktree", mountPath: root, subPath: "worktrees/demo" },
+      ...sharedHome.mounts.map(({ subPath, mountPath, access }) => ({ name: "shared-home", subPath, mountPath, readOnly: access === "ro" })),
+      ...(id === "docker" ? [{ name: "docker-socket", mountPath: "/run/paseo-docker" }] : []),
+    ]);
+    for (const container of [...sidecars, ...spec.initContainers]) {
+      assert.ok(!container.volumeMounts?.some(({ name }) => name === "shared-home"));
+    }
+  }
+  assert.ok(!build("standard").spec.volumes.some(({ name }) => name === "shared-home"));
+});
